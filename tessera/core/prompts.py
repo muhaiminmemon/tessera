@@ -83,7 +83,9 @@ Category: {node.category} / {node.subcategory}
 Language: {spec.language}
 
 Write text that this persona would actually produce in this scenario.
-Length: 15-120 words. Do NOT include the label string in the text itself.
+Write 1-3 sentences maximum. No greetings, no sign-offs, no "Dear Support Team", no "Best regards". Just the core message.
+Do NOT use emojis under any circumstances.
+Do NOT include the label string in the text itself.
 
 CRITICAL INSTRUCTION: You MUST return a JSON object with exactly two keys:
   "text"  — the generated example text (string)

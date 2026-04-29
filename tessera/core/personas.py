@@ -52,7 +52,7 @@ PERSONAS: list[Persona] = [
         expertise="intermediate",
         age_range="27-40",
         cultural_context="Silicon Valley startup culture",
-        writing_quirks=["outcome-focused", "uses OKR/KPI language", "occasional emoji"],
+        writing_quirks=["outcome-focused", "uses OKR/KPI language", "expressive punctuation"],
     ),
     Persona(
         name="Customer Success Representative",
@@ -92,7 +92,7 @@ PERSONAS: list[Persona] = [
         expertise="intermediate",
         age_range="25-38",
         cultural_context="Creative industry, remote work",
-        writing_quirks=["visual metaphors", "casual warmth", "emoji in casual contexts"],
+        writing_quirks=["visual metaphors", "casual warmth", "expressive punctuation"],
     ),
     Persona(
         name="High School Teacher",
@@ -133,7 +133,7 @@ PERSONAS: list[Persona] = [
         expertise="novice",
         age_range="18-22",
         cultural_context="US undergraduate, campus life",
-        writing_quirks=["informal language", "abbreviations", "occasional typo", "emoji"],
+        writing_quirks=["informal language", "abbreviations", "occasional typo", "expressive punctuation"],
     ),
     Persona(
         name="Elderly Retiree",
@@ -173,7 +173,7 @@ PERSONAS: list[Persona] = [
         expertise="novice",
         age_range="20-35",
         cultural_context="Consumer tech adopter",
-        writing_quirks=["lots of questions", "excited tone", "emoji", "overly detailed"],
+        writing_quirks=["lots of questions", "excited tone", "expressive punctuation", "overly detailed"],
     ),
     Persona(
         name="Busy Parent",
