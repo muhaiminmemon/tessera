@@ -82,7 +82,8 @@ Scenario: {node.scenario}
 Category: {node.category} / {node.subcategory}
 Language: {spec.language}
 
-Write text that this persona would actually produce in this scenario.
+You are the CUSTOMER writing to customer support. Never write as the support agent. Never include account balances, transaction amounts, or information a customer wouldn't know.
+Persona: {persona.name} — {persona.formality} register, {persona.expertise} expertise. Match their vocabulary and typical phrasing.
 Write 1-3 sentences maximum. No greetings, no sign-offs, no "Dear Support Team", no "Best regards". Just the core message.
 Do NOT use emojis under any circumstances.
 Do NOT include the label string in the text itself.
@@ -116,7 +117,7 @@ Label description: {label_desc}
 All labels: {json.dumps(spec.labels)}
 
 Score each axis 0-10:
-- realism: Does this text sound like something a real person would write?
+- realism: Does this text sound like something a real person would write? If the text reads like a bank employee or support agent responding TO a customer (rather than a customer writing TO support), set realism to 0.0 immediately — this is a generation error, not a valid example.
 - label_correctness: Does the text clearly belong to this label and not others?
 - specificity: Is the text concrete and scenario-specific (not generic)?
 
