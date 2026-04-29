@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -10,13 +11,24 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 _client_singleton: Optional["LLMClient"] = None
 
 # Cost table: (prompt_cost_per_1M, completion_cost_per_1M)
+# Keys are model name prefixes — versioned names like "gpt-4o-mini-2024-07-18" match "gpt-4o-mini".
 _COST_TABLE: dict[str, tuple[float, float]] = {
     "gpt-4o-mini": (0.15, 0.60),
     "gpt-4o": (5.00, 15.00),
-    "claude-haiku-3": (0.25, 1.25),
     "claude-3-haiku-20240307": (0.25, 1.25),
+    "claude-haiku-3": (0.25, 1.25),
     "meta-llama/Llama-3.3-70B-Instruct-Turbo": (0.88, 0.88),
 }
+
+
+def _lookup_cost(model: str) -> tuple[float, float]:
+    """Exact match first, then longest-prefix match for versioned model names."""
+    if model in _COST_TABLE:
+        return _COST_TABLE[model]
+    for key in sorted(_COST_TABLE, key=len, reverse=True):
+        if model.startswith(key):
+            return _COST_TABLE[key]
+    return (0.0, 0.0)
 
 
 @dataclass
@@ -26,12 +38,17 @@ class UsageStats:
     cost_usd: float = 0.0
     calls: int = 0
 
+    def __post_init__(self) -> None:
+        self._lock = threading.Lock()
+
     def add(self, prompt_tokens: int, completion_tokens: int, model: str) -> None:
-        self.prompt_tokens += prompt_tokens
-        self.completion_tokens += completion_tokens
-        self.calls += 1
-        p_cost, c_cost = _COST_TABLE.get(model, (0.0, 0.0))
-        self.cost_usd += (prompt_tokens * p_cost + completion_tokens * c_cost) / 1_000_000
+        with self._lock:
+            self.prompt_tokens += prompt_tokens
+            self.completion_tokens += completion_tokens
+            self.calls += 1
+            p_cost, c_cost = _lookup_cost(model)
+            self.cost_usd += (prompt_tokens * p_cost + completion_tokens * c_cost) / 1_000_000
+            print(f"[tessera:cost] model={model!r} prompt={prompt_tokens} completion={completion_tokens} running_total=${self.cost_usd:.6f}")
 
 
 class LLMClient:
@@ -41,39 +58,44 @@ class LLMClient:
         self._anthropic: object = None
         self._together: object = None
         self._groq: object = None
+        self._init_lock = threading.Lock()
 
     def _get_openai(self) -> object:
         if self._openai is None:
-            from openai import OpenAI
-
-            self._openai = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+            with self._init_lock:
+                if self._openai is None:
+                    from openai import OpenAI
+                    self._openai = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
         return self._openai
 
     def _get_anthropic(self) -> object:
         if self._anthropic is None:
-            from anthropic import Anthropic
-
-            self._anthropic = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+            with self._init_lock:
+                if self._anthropic is None:
+                    from anthropic import Anthropic
+                    self._anthropic = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
         return self._anthropic
 
     def _get_together(self) -> object:
         if self._together is None:
-            from openai import OpenAI
-
-            self._together = OpenAI(
-                api_key=os.environ.get("TOGETHER_API_KEY", ""),
-                base_url="https://api.together.xyz/v1",
-            )
+            with self._init_lock:
+                if self._together is None:
+                    from openai import OpenAI
+                    self._together = OpenAI(
+                        api_key=os.environ.get("TOGETHER_API_KEY", ""),
+                        base_url="https://api.together.xyz/v1",
+                    )
         return self._together
 
     def _get_groq(self) -> object:
         if self._groq is None:
-            from openai import OpenAI
-
-            self._groq = OpenAI(
-                api_key=os.environ.get("GROQ_API_KEY", ""),
-                base_url="https://api.groq.com/openai/v1",
-            )
+            with self._init_lock:
+                if self._groq is None:
+                    from openai import OpenAI
+                    self._groq = OpenAI(
+                        api_key=os.environ.get("GROQ_API_KEY", ""),
+                        base_url="https://api.groq.com/openai/v1",
+                    )
         return self._groq
 
     def _route(self, model: str) -> str:

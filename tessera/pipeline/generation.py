@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import os
 import random
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from tessera.core.llm_client import get_client
 from tessera.core.models import (
@@ -40,19 +42,27 @@ class GenerationEngine:
         model: str = "gpt-4o-mini",
         n: int | None = None,
     ) -> list[Example]:
-        """Generate up to n examples by iterating over node/persona pairs."""
+        """Generate examples in parallel using ThreadPoolExecutor."""
         client = get_client()
         target = n if n is not None else len(nodes)
         sample = nodes[:target]
+        max_workers = int(os.environ.get("TESSERA_MAX_CONCURRENT", "10"))
 
-        examples: list[Example] = []
-        for node in sample:
+        def _worker(node: TaxonomyNode) -> Example | None:
             persona = random.choice(personas)
             try:
-                ex = self._generate_one(client, node, persona, spec, task_type, model)
-                examples.append(ex)
+                return self._generate_one(client, node, persona, spec, task_type, model)
             except Exception as exc:
                 print(f"[GenerationEngine] failed node={node.id} persona={persona.name}: {exc}")
+                return None
+
+        examples: list[Example] = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(_worker, node): node for node in sample}
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    examples.append(result)
 
         return examples
 

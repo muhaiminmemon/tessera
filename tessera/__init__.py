@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -83,11 +84,17 @@ def generate(
     else:
         raise ValueError(f"Unknown task type: {task!r}. Choose from: classification, extraction, instruction")
 
+    t0 = time.time()
     result = task_obj.run_pipeline(
         spec=spec,
         personas=personas,
         n_examples=n_examples,
         critique_threshold=critique_threshold,
+    )
+    elapsed = time.time() - t0
+    print(
+        f"[tessera] done: {len(result.examples)} examples | "
+        f"cost ${result.cost_usd:.4f} | {elapsed:.1f}s"
     )
 
     if output_path:

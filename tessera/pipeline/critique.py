@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from tessera.core.llm_client import get_client
 from tessera.core.models import (
@@ -58,3 +60,42 @@ class CritiqueEngine:
             specificity=float(data.get("specificity", 0)),
             reasoning=str(data.get("reasoning", "")),
         )
+
+    def score_batch(
+        self,
+        examples: list[Example],
+        spec: TaskSpec,
+        task_type: TaskType,
+        model: str = "gpt-4o-mini",
+        threshold: float = 6.0,
+    ) -> list[Example]:
+        """Score a batch of examples in parallel; warn if 100% pass rate."""
+        max_workers = int(os.environ.get("TESSERA_MAX_CONCURRENT", "10"))
+
+        def _worker(ex: Example) -> Example | None:
+            try:
+                scores = self.score(ex, spec, task_type, model)
+                ex.critique_scores = scores
+                ex.passed_critique = scores.passes(threshold)
+                return ex
+            except Exception as exc:
+                print(f"[CritiqueEngine] failed for example {ex.id}: {exc}")
+                return None
+
+        scored: list[Example] = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(_worker, ex): ex for ex in examples}
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    scored.append(result)
+
+        if scored:
+            pass_rate = sum(1 for ex in scored if ex.passed_critique) / len(scored)
+            if pass_rate >= 1.0 - 1e-9:
+                print(
+                    "[tessera] warning: 100% critique pass rate — "
+                    "consider raising threshold to 7.0"
+                )
+
+        return scored

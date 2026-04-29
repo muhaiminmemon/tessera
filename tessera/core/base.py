@@ -1,10 +1,13 @@
 """Abstract base class that all task implementations inherit from."""
 from __future__ import annotations
 
+import os
 import random
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
+from tessera.core.llm_client import get_client
 from tessera.core.models import (
     Example,
     GenerationResult,
@@ -71,28 +74,55 @@ class TaskTemplate(ABC):
         target_raw = int(n_examples * max_attempts_multiplier)
         nodes_sample = self._sample_nodes_balanced(taxonomy, target_raw)
 
-        raw_examples: list[Example] = []
-        for node in nodes_sample:
+        cost_before = get_client().usage.cost_usd
+        max_workers = int(os.environ.get("TESSERA_MAX_CONCURRENT", "10"))
+
+        # --- Parallel generation ---
+        def _gen_worker(node: Any) -> Example | None:
             persona = random.choice(personas)
             try:
-                ex = self.generate_example(node, persona, spec)
-                raw_examples.append(ex)
+                return self.generate_example(node, persona, spec)
             except Exception as exc:
                 print(f"[tessera] generation failed for node {node.id}: {exc}")
+                return None
+
+        raw_examples: list[Example] = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(_gen_worker, node) for node in nodes_sample]
+            for i, future in enumerate(as_completed(futures), 1):
+                result = future.result()
+                if result is not None:
+                    raw_examples.append(result)
+                if i % 10 == 0:
+                    print(f"[tessera] generating {i}/{target_raw}...")
 
         total_generated = len(raw_examples)
 
-        # Critique filter
-        scored: list[Example] = []
-        for ex in raw_examples:
+        # --- Parallel critique via score_batch (routes through task's critique_example
+        #     to preserve any task-specific post-processing) ---
+        def _critique_worker(ex: Example) -> Example | None:
             try:
-                ex = self.critique_example(ex, spec)
-                scored.append(ex)
+                return self.critique_example(ex, spec)
             except Exception as exc:
                 print(f"[tessera] critique failed for example {ex.id}: {exc}")
+                return None
+
+        scored: list[Example] = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures_c = {executor.submit(_critique_worker, ex): ex for ex in raw_examples}
+            for future in as_completed(futures_c):
+                result = future.result()
+                if result is not None:
+                    scored.append(result)
 
         passed = [ex for ex in scored if ex.passed_critique]
         total_after_critique = len(passed)
+
+        if scored and total_after_critique == len(scored):
+            print(
+                "[tessera] warning: 100% critique pass rate — "
+                "consider raising threshold to 7.0"
+            )
 
         # Dedup
         deduped = self.deduplicate(passed)
@@ -101,6 +131,8 @@ class TaskTemplate(ABC):
         # Trim to requested size
         final = deduped[:n_examples]
 
+        cost_usd = get_client().usage.cost_usd - cost_before
+
         return GenerationResult(
             task_type=self._task_type(),
             spec=spec.model_dump(),
@@ -108,6 +140,7 @@ class TaskTemplate(ABC):
             total_generated=total_generated,
             total_after_critique=total_after_critique,
             total_after_dedup=total_after_dedup,
+            cost_usd=cost_usd,
         )
 
     # ------------------------------------------------------------------
