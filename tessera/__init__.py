@@ -12,6 +12,11 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
+from dotenv import load_dotenv
+
+# Always load .env from the repo root, regardless of where Python is invoked from.
+load_dotenv(Path(__file__).parent.parent / ".env")
+
 from tessera.core.models import (
     ClassificationSpec,
     ExtractionSpec,
@@ -89,7 +94,7 @@ def generate(
         formatted = task_obj.format_for_finetuning(result.examples, fmt=output_format)
         output_file = Path(output_path)
         output_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_file, "w") as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             for row in formatted:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
 

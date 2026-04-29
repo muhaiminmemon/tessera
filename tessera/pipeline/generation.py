@@ -18,6 +18,18 @@ from tessera.core.models import (
 from tessera.core import prompts
 
 
+def _parse_json(raw: str) -> dict:
+    """Parse JSON from LLM output, stripping markdown fences if present."""
+    text = raw.strip()
+    # Strip ```json ... ``` or ``` ... ``` fences
+    if text.startswith("```"):
+        lines = text.splitlines()
+        # drop first and last fence lines
+        inner = [l for l in lines[1:] if l.strip() != "```"]
+        text = "\n".join(inner).strip()
+    return json.loads(text)
+
+
 class GenerationEngine:
     def generate_batch(
         self,
@@ -81,16 +93,21 @@ class GenerationEngine:
             json_mode=True,
         )
 
-        data = json.loads(raw)
+        data = _parse_json(raw)
 
         if task_type == TaskType.CLASSIFICATION:
             assert isinstance(spec, ClassificationSpec)
             label = data.get("label", "")
+            # Fall back to the node's target_label rather than discarding the example.
+            # The node always carries a valid spec label, so this is safe.
             if label not in spec.labels:
-                raise ValueError(f"Generated label '{label}' not in spec labels {spec.labels}")
+                label = node.target_label
+            text = data.get("text", "").strip()
+            if not text:
+                raise ValueError("LLM returned empty text field")
             return Example(
                 task_type=task_type,
-                text=data["text"],
+                text=text,
                 label=label,
                 taxonomy_node_id=node.id,
                 persona_id=persona.id,

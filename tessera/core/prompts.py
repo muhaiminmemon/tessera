@@ -79,16 +79,20 @@ def classification_generation_user(
     return f"""Task: Generate one realistic text example for a {spec.domain} classifier.
 
 Scenario: {node.scenario}
-Target label: {node.target_label}
 Category: {node.category} / {node.subcategory}
 Language: {spec.language}
 
 Write text that this persona would actually produce in this scenario.
-The text should unambiguously belong to the label "{node.target_label}".
-Length: 15-120 words. Do NOT include the label name in the text itself.
+Length: 15-120 words. Do NOT include the label string in the text itself.
 
-Return JSON:
-{{"text": "<the generated text>", "label": "{node.target_label}"}}"""
+CRITICAL INSTRUCTION: You MUST return a JSON object with exactly two keys:
+  "text"  — the generated example text (string)
+  "label" — copy this string EXACTLY, character-for-character: {node.target_label!r}
+
+The "label" value must be the exact string {node.target_label!r} — no other value is valid.
+
+Return JSON (and nothing else):
+{{"text": "<your generated text here>", "label": {json.dumps(node.target_label)}}}"""
 
 
 def classification_critique_system(example: "Example", spec: "ClassificationSpec") -> str:
