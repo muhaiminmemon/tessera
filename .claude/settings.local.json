@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile tessera/core/models.py tessera/core/personas.py tessera/core/llm_client.py tessera/core/prompts.py tessera/core/base.py tessera/core/__init__.py tessera/pipeline/taxonomy.py tessera/pipeline/generation.py tessera/pipeline/critique.py tessera/pipeline/dedup.py tessera/pipeline/hard_negative.py tessera/pipeline/__init__.py tessera/tasks/classification.py tessera/tasks/extraction.py tessera/tasks/instruction.py tessera/tasks/__init__.py tessera/validation/finetune.py tessera/validation/evaluate.py tessera/validation/benchmarks.py tessera/validation/__init__.py tessera/cli.py tessera/__init__.py examples/banking77_classification.py examples/docred_extraction.py examples/python_instruction.py tests/test_models.py)"
+    ]
+  }
+}
