@@ -25,10 +25,12 @@ class ClassificationTask(TaskTemplate):
         model: str = "gpt-4o-mini",
         critique_model: str = "gpt-4o-mini",
         dedup_threshold: float = 0.90,
+        critique_threshold: float = 7.0,
     ) -> None:
         self.model = model
         self.critique_model = critique_model
         self.dedup_threshold = dedup_threshold
+        self.critique_threshold = critique_threshold
         self._expander = TaxonomyExpander()
         self._generator = GenerationEngine()
         self._critiquer = CritiqueEngine()
@@ -66,7 +68,7 @@ class ClassificationTask(TaskTemplate):
             model=self.critique_model,
         )
         example.critique_scores = scores
-        example.passed_critique = scores.passes(6.0)
+        example.passed_critique = scores.passes(self.critique_threshold)
         return example
 
     def deduplicate(self, examples: list[Example]) -> list[Example]:

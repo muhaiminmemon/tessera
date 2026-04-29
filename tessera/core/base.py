@@ -74,6 +74,11 @@ class TaskTemplate(ABC):
         target_raw = int(n_examples * max_attempts_multiplier)
         nodes_sample = self._sample_nodes_balanced(taxonomy, target_raw)
 
+        # Propagate the caller-supplied threshold into the task so critique_example
+        # uses it instead of the task's constructor default.
+        if hasattr(self, "critique_threshold"):
+            self.critique_threshold = critique_threshold
+
         cost_before = get_client().usage.cost_usd
         max_workers = int(os.environ.get("TESSERA_MAX_CONCURRENT", "10"))
 
@@ -128,8 +133,8 @@ class TaskTemplate(ABC):
         deduped = self.deduplicate(passed)
         total_after_dedup = len(deduped)
 
-        # Trim to requested size
-        final = deduped[:n_examples]
+        # Trim to requested size with strict label balance
+        final = self._trim_to_balance(deduped, n_examples)
 
         cost_usd = get_client().usage.cost_usd - cost_before
 
@@ -152,24 +157,60 @@ class TaskTemplate(ABC):
 
     @staticmethod
     def _sample_nodes_balanced(taxonomy: Taxonomy, n: int) -> list[Any]:
-        """Round-robin over labels to produce a balanced node sample."""
-        labels = list({node.target_label for node in taxonomy.nodes})
+        """Quota-based balanced node sampling.
+
+        Each label gets exactly n // num_labels slots; remainder labels get one
+        extra.  Within each quota, nodes are sampled with replacement so every
+        label is always represented even when it has only one taxonomy node.
+        """
+        labels = sorted({node.target_label for node in taxonomy.nodes})
         if not labels:
             return []
 
+        num_labels = len(labels)
+        base_quota = n // num_labels
+        remainder = n % num_labels
         buckets: dict[str, list[Any]] = {lbl: taxonomy.nodes_for_label(lbl) for lbl in labels}
-        result: list[Any] = []
-        label_cycle = list(labels)
-        idx = 0
 
-        while len(result) < n:
-            label = label_cycle[idx % len(label_cycle)]
-            bucket = buckets[label]
+        result: list[Any] = []
+        for i, label in enumerate(labels):
+            quota = base_quota + (1 if i < remainder else 0)
+            bucket = buckets.get(label, [])
             if bucket:
-                result.append(random.choice(bucket))
-            idx += 1
-            if idx > n * 10:
-                break
+                result.extend(random.choices(bucket, k=quota))
+
+        random.shuffle(result)
+        return result
+
+    @staticmethod
+    def _trim_to_balance(examples: list[Example], n: int) -> list[Example]:
+        """Trim to n examples with exactly n // num_labels per label.
+
+        Only applied for classification examples (those with a non-None label).
+        Extraction / instruction examples fall back to a plain head-trim.
+        """
+        if not examples:
+            return []
+
+        # Non-classification tasks: simple trim
+        if any(ex.label is None for ex in examples):
+            return examples[:n]
+
+        label_set = sorted({ex.label for ex in examples})  # type: ignore[arg-type]
+        num_labels = len(label_set)
+        if num_labels == 0:
+            return examples[:n]
+
+        buckets: dict[str, list[Example]] = {lbl: [] for lbl in label_set}
+        for ex in examples:
+            buckets[ex.label].append(ex)  # type: ignore[index]
+
+        base_q = n // num_labels
+        remainder = n % num_labels
+        result: list[Example] = []
+        for i, label in enumerate(label_set):
+            quota = base_q + (1 if i < remainder else 0)
+            result.extend(buckets[label][:quota])
 
         random.shuffle(result)
         return result
