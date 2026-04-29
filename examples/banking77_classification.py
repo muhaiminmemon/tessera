@@ -1,7 +1,7 @@
 """
 Banking-77 classification smoke test.
 
-Generates 50 synthetic banking support examples across 5 intent labels,
+Generates synthetic banking support examples across 5 intent labels,
 prints pipeline stats, label distribution, and 5 random samples.
 Writes output to outputs/banking77_smoke_test.jsonl.
 """
@@ -51,7 +51,7 @@ def main() -> None:
     result = generate(
         task="classification",
         spec_dict=SPEC,
-        n_examples=50,
+        n_examples=100,
         output_format="jsonl",
         output_path="outputs/banking77_smoke_test.jsonl",
     )
