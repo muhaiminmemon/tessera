@@ -51,7 +51,7 @@ def main() -> None:
     result = generate(
         task="classification",
         spec_dict=SPEC,
-        n_examples=100,
+        n_examples=1000,
         output_format="jsonl",
         output_path="outputs/banking77_smoke_test.jsonl",
     )
