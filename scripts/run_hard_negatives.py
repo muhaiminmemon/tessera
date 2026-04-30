@@ -23,8 +23,13 @@ print(f"Loaded {len(examples)} examples")
 
 spec = ClassificationSpec(
     domain="banking customer support",
-    labels=["card_lost", "transfer_failed", "balance_inquiry",
-            "account_locked", "foreign_transaction_declined"],
+    labels=[
+        "lost_or_stolen_card",
+        "failed_transfer",
+        "balance_not_updated_after_bank_transfer",
+        "pin_blocked",
+        "card_payment_wrong_exchange_rate",
+    ],
 )
 
 # Debug: inspect probability distribution
