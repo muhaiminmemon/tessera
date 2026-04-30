@@ -193,6 +193,8 @@ Language: {spec.language}
    "{persona.name}" might produce or encounter.
 2. Extract every schema field from the text.
 
+Return extracted_fields as a single JSON object (dict), NOT a list or array. Extract exactly ONE relation triple.
+
 Return JSON:
 {{
   "source_text": "<the generated document>",

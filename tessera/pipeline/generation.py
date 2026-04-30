@@ -124,10 +124,13 @@ class GenerationEngine:
                 model_used=model,
             )
         elif task_type == TaskType.EXTRACTION:
+            extracted = data.get("extracted_fields", {})
+            if isinstance(extracted, list):
+                extracted = extracted[0] if extracted else {}
             return Example(
                 task_type=task_type,
                 source_text=data["source_text"],
-                extracted_fields=data["extracted_fields"],
+                extracted_fields=extracted,
                 taxonomy_node_id=node.id,
                 persona_id=persona.id,
                 model_used=model,

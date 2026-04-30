@@ -1,64 +1,77 @@
-import urllib.request
-import json
+"""
+DocRED relation extraction — grounded in actual DocRED top relation frequencies.
+Top 8 relations by occurrence count across the training set (from research papers):
+P17 country, P131 located_in_territory, P27 country_of_citizenship,
+P150 contains_territory, P36 capital, P161 cast_member, P175 performer, P19 place_of_birth
+"""
+from tessera import generate
 from collections import Counter
 
-# Correct raw URL for DocRED data
-url = "https://raw.githubusercontent.com/thunlp/DocRED/master/data/train_annotated.json"
 
-print("Downloading DocRED rel_info.json...")
-rel_url = "https://raw.githubusercontent.com/thunlp/DocRED/master/meta/rel_info.json"
+SPEC = {
+    "domain": "Wikipedia biographical and geographical articles",
+    "schema_definition": {
+        "head_entity": "name of the subject entity (person, organization, or location)",
+        "relation": (
+            "one of exactly these values: "
+            "country | located_in_territory | country_of_citizenship | "
+            "contains_territory | capital | cast_member | performer | place_of_birth"
+        ),
+        "tail_entity": "name of the object entity (person, organization, or location)",
+        "evidence_sentence": (
+            "the single sentence from the source text that most directly "
+            "expresses this relation between the two entities"
+        ),
+    },
+    "source_text_type": "Wikipedia paragraph about a person, place, or organization",
+    "language": "English",
+}
 
-try:
-    urllib.request.urlretrieve(rel_url, "scripts/docred_rel_info.json")
-    print("rel_info downloaded")
-except Exception as e:
-    print(f"rel_info failed: {e}")
 
-print("Downloading train_annotated.json...")
-try:
-    urllib.request.urlretrieve(url, "scripts/docred_train.json")
-    print("train data downloaded")
-except Exception as e:
-    print(f"train data failed: {e}")
-    # Fallback — just use hardcoded top relations from papers
-    print("\nUsing hardcoded top relations from research papers:")
-    top_relations = [
-        ("P17",  "country"),
-        ("P131", "located in the administrative territorial entity"),
-        ("P27",  "country of citizenship"),
-        ("P150", "contains administrative territorial entity"),
-        ("P36",  "capital"),
-        ("P161", "cast member"),
-        ("P175", "performer"),
-        ("P178", "developer"),
-        ("P19",  "place of birth"),
-        ("P20",  "place of death"),
-        ("P22",  "father"),
-        ("P25",  "mother"),
-        ("P26",  "spouse"),
-        ("P40",  "child"),
-        ("P58",  "screenwriter"),
-    ]
-    for pid, name in top_relations:
-        print(f"  {pid:<8} | {name}")
-    exit()
+def main() -> None:
+    print("=" * 60)
+    print("DocRED Relation Extraction  |  Tessera benchmark")
+    print("8 relations grounded in real DocRED frequency distribution")
+    print("=" * 60)
 
-with open("scripts/docred_train.json") as f:
-    data = json.load(f)
+    result = generate(
+        task="extraction",
+        spec_dict=SPEC,
+        n_examples=500,
+        output_format="jsonl",
+        output_path="outputs/docred_tessera_train.jsonl",
+    )
 
-with open("scripts/docred_rel_info.json") as f:
-    rel_info = json.load(f)
+    print(f"\nPipeline stats:")
+    print(f"  Generated:      {result.total_generated}")
+    print(f"  After critique: {result.total_after_critique}")
+    print(f"  After dedup:    {result.total_after_dedup}")
+    print(f"  Final:          {len(result.examples)}")
+    print(f"  Est. cost:     ${result.cost_usd:.4f}")
 
-print(f"Total documents: {len(data)}")
+    # Relation distribution
+    rel_counts = Counter(
+        ex.extracted_fields.get("relation", "unknown")
+        for ex in result.examples
+        if ex.extracted_fields
+    )
+    print("\nRelation distribution:")
+    for rel, count in rel_counts.most_common():
+        bar = "█" * count
+        print(f"  {rel:<30} {count:>4}  {bar}")
 
-relation_counts = Counter()
-for doc in data:
-    for label in doc.get("labels", []):
-        relation_counts[label["r"]] += 1
+    print("\nSample triples:")
+    import random
+    for ex in random.sample(result.examples, min(5, len(result.examples))):
+        fields = ex.extracted_fields or {}
+        print(
+            f"  ({fields.get('head_entity')}, "
+            f"{fields.get('relation')}, "
+            f"{fields.get('tail_entity')})"
+        )
 
-print(f"\nTop 15 most frequent relations:")
-print(f"  {'Count':>7} | {'ID':<8} | Name")
-print(f"  {'-'*50}")
-for rel_id, count in relation_counts.most_common(15):
-    name = rel_info.get(rel_id, "unknown")
-    print(f"  {count:>7} | {rel_id:<8} | {name}")
+    print(f"\nOutput: outputs/docred_tessera_train.jsonl")
+
+
+if __name__ == "__main__":
+    main()
