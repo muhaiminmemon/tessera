@@ -15,19 +15,19 @@ from tessera import generate
 from tessera.core.models import TaskType
 
 LABELS = [
-    "card_lost",
-    "transfer_failed",
-    "balance_inquiry",
-    "account_locked",
-    "foreign_transaction_declined",
+    "lost_or_stolen_card",
+    "failed_transfer",
+    "balance_not_updated_after_bank_transfer",
+    "pin_blocked",
+    "card_payment_wrong_exchange_rate",
 ]
 
 LABEL_DESCRIPTIONS = {
-    "card_lost": "Customer reporting their debit or credit card is lost or stolen",
-    "transfer_failed": "Customer reporting a failed or pending money transfer",
-    "balance_inquiry": "Customer asking about their account balance or recent transactions",
-    "account_locked": "Customer unable to log in or whose account has been locked/suspended",
-    "foreign_transaction_declined": "Customer whose card was declined while abroad or on a foreign purchase",
+    "lost_or_stolen_card": "Customer reporting their debit or credit card is lost or stolen",
+    "failed_transfer": "Customer reporting that a bank transfer failed or did not complete",
+    "balance_not_updated_after_bank_transfer": "Customer saying their balance has not updated after a bank transfer",
+    "pin_blocked": "Customer saying their card PIN is blocked or they cannot use it due to too many failed PIN attempts",
+    "card_payment_wrong_exchange_rate": "Customer saying a card payment used the wrong exchange rate for a foreign currency transaction",
 }
 
 SPEC = {
@@ -36,9 +36,11 @@ SPEC = {
     "label_descriptions": LABEL_DESCRIPTIONS,
     "language": "English",
     "example_inputs": [
-        "I can't find my card anywhere",
-        "My payment didn't go through",
-        "What's my current balance?",
+        "I lost my card and need to block it",
+        "My bank transfer failed",
+        "My balance has not updated after my transfer",
+        "My PIN is blocked after too many attempts",
+        "My foreign card payment used the wrong exchange rate",
     ],
 }
 
