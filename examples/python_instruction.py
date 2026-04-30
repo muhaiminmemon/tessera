@@ -1,37 +1,38 @@
 """
-Python programming instruction-following smoke test.
-
-Generates 30 synthetic instruction/response pairs covering four Python task types.
-Prints sample pairs to stdout.
+Python instruction-following — grounded in real iamtarun/python_code_instructions_18k_alpaca
+distribution. Top verbs: create (32%), write (22%), generate (11%), design (6%), develop (5%).
+Mapped to 5 instruction types matching that distribution.
 """
-from __future__ import annotations
-
 from tessera import generate
+import random
+
 
 SPEC = {
     "domain": "Python programming",
     "instruction_types": [
-        "write a Python function",
-        "debug Python code",
-        "explain Python concept",
-        "refactor Python code",
+        "create a Python function or class",      # maps to create (32%)
+        "write a Python script or program",       # maps to write (22%)
+        "generate Python code for a task",        # maps to generate (11%)
+        "design a Python solution or algorithm",  # maps to design (6%)
+        "develop a Python module or utility",     # maps to develop (5%)
     ],
-    "response_format": "markdown with code blocks",
+    "response_format": "markdown with Python code blocks and brief explanation",
     "language": "English",
 }
 
 
 def main() -> None:
     print("=" * 60)
-    print("Python Instruction-Following  |  Tessera smoke test")
+    print("Python Instruction-Following  |  Tessera benchmark")
+    print("5 types grounded in real dataset verb distribution")
     print("=" * 60)
 
     result = generate(
         task="instruction",
         spec_dict=SPEC,
-        n_examples=30,
+        n_examples=500,
         output_format="alpaca",
-        output_path="outputs/python_instruction_smoke_test.jsonl",
+        output_path="outputs/python_instruction_tessera_train.jsonl",
     )
 
     print(f"\nPipeline stats:")
@@ -41,39 +42,12 @@ def main() -> None:
     print(f"  Final:          {len(result.examples)}")
     print(f"  Est. cost:     ${result.cost_usd:.4f}")
 
-    # Count instruction types (via taxonomy_node_id not available directly, use first word)
-    from collections import Counter
+    print("\nSample instruction/response pairs:")
+    for ex in random.sample(result.examples, min(3, len(result.examples))):
+        print(f"\n  INSTRUCTION: {(ex.instruction or '')[:120]}")
+        print(f"  RESPONSE:    {(ex.response or '')[:120]}...")
 
-    def infer_type(instruction: str) -> str:
-        instruction_lower = (instruction or "").lower()
-        for itype in SPEC["instruction_types"]:
-            if itype.split()[0] in instruction_lower or itype.split()[-1] in instruction_lower:
-                return itype
-        return "other"
-
-    type_counts = Counter(infer_type(ex.instruction) for ex in result.examples)
-    print("\nInstruction type distribution:")
-    for itype, count in sorted(type_counts.items()):
-        print(f"  {itype:<35} {count}")
-
-    print("\n" + "=" * 60)
-    print("Sample instruction/response pairs")
-    print("=" * 60)
-
-    for i, ex in enumerate(result.examples[:5], 1):
-        print(f"\n--- Example {i} ---")
-        print(f"INSTRUCTION:\n{ex.instruction}")
-        print(f"\nRESPONSE:\n{(ex.response or '')[:400]}")
-        if len(ex.response or "") > 400:
-            print("  [truncated...]")
-        if ex.critique_scores:
-            print(
-                f"\n  Critique: mean={ex.critique_scores.mean:.1f}  "
-                f"clarity={ex.critique_scores.realism:.0f}  "
-                f"quality={ex.critique_scores.label_correctness:.0f}"
-            )
-
-    print("\nOutput written to: outputs/python_instruction_smoke_test.jsonl")
+    print(f"\nOutput: outputs/python_instruction_tessera_train.jsonl")
 
 
 if __name__ == "__main__":
