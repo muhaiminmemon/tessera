@@ -121,16 +121,12 @@ Extraction is the hardest task type — the model simultaneously learns entity i
 ## Install
 
 ```bash
-pip install tessera
-```
-
-Or from source:
-
-```bash
 git clone https://github.com/muhaiminmemon/tessera
 cd tessera
 pip install -e ".[dev]"
 ```
+
+> PyPI release coming soon. For now, install from source above.
 
 Add your API keys — copy `.env.example` to `.env`:
 
@@ -379,7 +375,7 @@ Your spec (domain, labels / schema / question_types)
 ┌─────────────────────────────────────────┐
 │  Stage 4 — Embedding Deduplication      │
 │                                         │
-│  all-MiniLM-L6-v2 + ChromaDB removes   │
+│  all-MiniLM-L6-v2 + ChromaDB removes    │
 │  near-duplicate examples                │
 │  (cosine similarity ≥ threshold).       │
 │  QA deduplicates on question text only  │
@@ -403,8 +399,8 @@ Your spec (domain, labels / schema / question_types)
 │  Stage 6 — Downstream Validation        │
 │                                         │
 │  Optional: Unsloth LoRA fine-tune       │
-│  (Llama-3.2-3B, r=16, 3 epochs) →      │
-│  F1 / ROUGE-L / token F1 vs held-out   │
+│  (Llama-3.2-3B, r=16, 3 epochs) →       │
+│  F1 / ROUGE-L / token F1 vs held-out    │
 │  test set and real-data baseline.       │
 └─────────────────────────────────────────┘
          │
@@ -670,7 +666,7 @@ All LLM calls in tests are mocked — the full test suite runs in under 1 second
 - [ ] **Dialogue task** — multi-turn conversations in ShareGPT format
 - [ ] **Dataset card auto-generation** — auto-generate HuggingFace dataset cards with benchmark numbers
 - [ ] **Cost budgeting** — `max_cost_usd` parameter to cap spend before running
-- [ ] **PyPI release** — `pip install tessera` from the public index
+- [ ] **PyPI release** — `pip install tessera` from the public index (packaging is ready, pending first stable release)
 
 ---
 
