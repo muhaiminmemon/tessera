@@ -180,7 +180,7 @@ Task Spec (domain, labels / schema / instruction_types / question_types)
 
 ---
 
-### Task 2 — SQuAD Question Answering (RAG evaluation)
+### Task 2 — SQuAD Question Answering (fine-tuning benchmark)
 
 | Condition | Token F1 | Training examples | Cost |
 |-----------|----------|------------------|------|
@@ -188,6 +188,28 @@ Task Spec (domain, labels / schema / instruction_types / question_types)
 | **Tessera synthetic** | **0.6182** | **137** | **$0.19** |
 
 **Tessera = 72.5% of real SQuAD F1 for $0.19**
+
+---
+
+### Task 2b — Enterprise RAG Evaluation (reader benchmark)
+
+Tessera generates domain-specific QA pairs, then evaluates a RAG reader model against them. Tested with gpt-4o-mini as the reader on 150 enterprise software documentation QA pairs.
+
+| Metric | Score | What it measures |
+|--------|-------|-----------------|
+| Factoid F1 | **0.822** | Direct fact extraction from context |
+| Multi-hop F1 | **0.819** | Reasoning across two facts in a passage |
+| Unanswerable accuracy | **0.980** | Hallucination refusal rate |
+| **Overall** | **0.873** | Mean across all question types |
+
+**98% hallucination refusal rate** — the model correctly refused to answer when the context didn't support it on 49/50 unanswerable questions.
+
+> *"We generated 150 QA pairs from your domain for $0.19. We found your RAG system scores 82% on factual retrieval and correctly refuses to hallucinate 98% of the time. Here's where it fails — and what training data would fix it."*
+
+Run against your own domain:
+```bash
+python scripts/evaluate_rag.py --input outputs/rag_eval_qa.jsonl --model gpt-4o-mini
+```
 
 #### Scaling projection (estimated)
 
@@ -224,12 +246,13 @@ Task Spec (domain, labels / schema / instruction_types / question_types)
 
 ### Summary
 
-| Task | Tessera % of real data | Training cost |
-|------|----------------------|---------------|
-| Banking77 classification | **97.1%** | $0.40 |
-| SQuAD QA | **72.5%** | $0.19 |
-| Python instruction | **+26.85% ROUGE-L** | ~$0.30 |
-| DocRED extraction | 31.8% | ~$0.50 |
+| Task | Result | Cost |
+|------|--------|------|
+| Banking77 classification | **97.1% of real-data F1** | $0.40 |
+| SQuAD QA (fine-tune) | **72.5% of real-data F1** | $0.19 |
+| Enterprise RAG eval | **98% hallucination refusal, 82% factoid F1** | $0.19 |
+| Python instruction | **+26.85% ROUGE-L over zero-shot** | ~$0.30 |
+| DocRED extraction | 31.8% of real-data F1 | ~$0.50 |
 
 ---
 
@@ -251,8 +274,9 @@ Task Spec (domain, labels / schema / instruction_types / question_types)
 | `examples/banking77_classification.py` | Classification | Banking intent | 1,246 | $0.40 |
 | `examples/docred_extraction.py` | Extraction | Wikipedia relations | 500 | ~$0.50 |
 | `examples/python_instruction.py` | Instruction | Python coding | ~317 | ~$0.30 |
-| `examples/rag_eval_qa.py` | QA | Enterprise docs | 150 | $0.19 |
-| `examples/squad_qa.py` | QA | General knowledge | 137 | $0.19 |
+| `examples/rag_eval_qa.py` | QA generation | Enterprise docs | 150 | $0.19 |
+| `examples/squad_qa.py` | QA generation | General knowledge | 137 | $0.19 |
+| `scripts/evaluate_rag.py` | RAG evaluation | Any domain | — | ~$0.05/150 examples |
 
 ---
 
