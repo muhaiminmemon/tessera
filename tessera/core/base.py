@@ -1,12 +1,14 @@
 """Abstract base class that all task implementations inherit from."""
 from __future__ import annotations
 
-import os
+import logging
 import random
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
+from typing import Any, Callable
 
+from tessera.core import config as _cfg
+from tessera.core.exceptions import ConfigurationError
 from tessera.core.llm_client import get_client
 from tessera.core.models import (
     Example,
@@ -16,6 +18,8 @@ from tessera.core.models import (
     TaskType,
     Taxonomy,
 )
+
+log = logging.getLogger(__name__)
 
 
 class TaskTemplate(ABC):
@@ -56,6 +60,10 @@ class TaskTemplate(ABC):
     ) -> Any:
         raise NotImplementedError
 
+    @abstractmethod
+    def _task_type(self) -> TaskType:
+        raise NotImplementedError
+
     # ------------------------------------------------------------------
     # Concrete pipeline orchestration
     # ------------------------------------------------------------------
@@ -70,10 +78,15 @@ class TaskTemplate(ABC):
         target_per_label: int | None = None,
     ) -> GenerationResult:
         """End-to-end pipeline: taxonomy → generate → critique → dedup → trim."""
-        taxonomy = self.build_taxonomy(spec)
+        if n_examples <= 0:
+            raise ConfigurationError(f"n_examples must be > 0, got {n_examples}")
+        if not personas:
+            raise ConfigurationError("personas list must not be empty")
 
+        taxonomy = self.build_taxonomy(spec)
         labels_in_taxonomy = sorted({n.target_label for n in taxonomy.nodes})
         num_labels = len(labels_in_taxonomy)
+
         effective_n = (
             target_per_label * num_labels
             if target_per_label is not None and num_labels > 0
@@ -83,75 +96,27 @@ class TaskTemplate(ABC):
         target_raw = int(effective_n * max_attempts_multiplier)
         nodes_sample = self._sample_nodes_balanced(taxonomy, target_raw)
 
-        # Only override the task's critique_threshold when the caller explicitly sets one.
         if critique_threshold is not None and hasattr(self, "critique_threshold"):
             self.critique_threshold = critique_threshold
 
+        max_workers = _cfg.max_concurrent()
         cost_before = get_client().usage.cost_usd
-        max_workers = int(os.environ.get("TESSERA_MAX_CONCURRENT", "10"))
 
-        # --- Parallel generation ---
-        def _gen_worker(node: Any) -> Example | None:
-            persona = random.choice(personas)
-            try:
-                return self.generate_example(node, persona, spec)
-            except Exception as exc:
-                print(f"[tessera] generation failed for node {node.id}: {exc}")
-                return None
-
-        raw_examples: list[Example] = []
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [executor.submit(_gen_worker, node) for node in nodes_sample]
-            for i, future in enumerate(as_completed(futures), 1):
-                result = future.result()
-                if result is not None:
-                    raw_examples.append(result)
-                if i % 10 == 0:
-                    print(f"[tessera] generating {i}/{target_raw}...")
-
+        raw_examples = self._run_generation_phase(nodes_sample, personas, spec, max_workers)
         total_generated = len(raw_examples)
 
-        # --- Parallel critique via score_batch (routes through task's critique_example
-        #     to preserve any task-specific post-processing) ---
-        def _critique_worker(ex: Example) -> Example | None:
-            try:
-                return self.critique_example(ex, spec)
-            except Exception as exc:
-                print(f"[tessera] critique failed for example {ex.id}: {exc}")
-                return None
+        passed = self._run_critique_phase(raw_examples, spec, max_workers)
 
-        scored: list[Example] = []
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures_c = {executor.submit(_critique_worker, ex): ex for ex in raw_examples}
-            for future in as_completed(futures_c):
-                result = future.result()
-                if result is not None:
-                    scored.append(result)
-
-        passed = [ex for ex in scored if ex.passed_critique]
-
-        if scored and len(passed) == len(scored):
-            print(
-                "[tessera] warning: 100% critique pass rate — "
-                "consider raising threshold to 7.0"
-            )
-
-        # Fill-up pass: targeted generation for underrepresented labels
         if target_per_label is not None and num_labels > 0:
             passed = self._fill_up_labels(
                 passed, taxonomy, labels_in_taxonomy, target_per_label,
-                max_attempts_multiplier, personas, spec, _gen_worker, _critique_worker,
+                max_attempts_multiplier, personas, spec, max_workers,
             )
 
         total_after_critique = len(passed)
-
-        # Dedup
         deduped = self.deduplicate(passed)
         total_after_dedup = len(deduped)
-
-        # Trim to requested size with strict label balance
         final = self._trim_to_balance(deduped, effective_n)
-
         cost_usd = get_client().usage.cost_usd - cost_before
 
         return GenerationResult(
@@ -165,7 +130,71 @@ class TaskTemplate(ABC):
         )
 
     # ------------------------------------------------------------------
-    # Helpers
+    # Pipeline phase helpers
+    # ------------------------------------------------------------------
+
+    def _run_generation_phase(
+        self,
+        nodes_sample: list[Any],
+        personas: list[Persona],
+        spec: TaskSpec,
+        max_workers: int,
+    ) -> list[Example]:
+        """Parallel generation phase; returns all successfully generated examples."""
+        def _gen_worker(node: Any) -> Example | None:
+            persona = random.choice(personas)
+            try:
+                return self.generate_example(node, persona, spec)
+            except Exception as exc:
+                log.warning("generation failed for node %s: %s", node.id, exc)
+                return None
+
+        raw: list[Example] = []
+        total = len(nodes_sample)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(_gen_worker, node) for node in nodes_sample]
+            for i, future in enumerate(as_completed(futures), 1):
+                result = future.result()
+                if result is not None:
+                    raw.append(result)
+                if i % 10 == 0:
+                    log.info("generating %d/%d...", i, total)
+
+        return raw
+
+    def _run_critique_phase(
+        self,
+        raw_examples: list[Example],
+        spec: TaskSpec,
+        max_workers: int,
+    ) -> list[Example]:
+        """Parallel critique phase; returns examples that passed the threshold."""
+        def _critique_worker(ex: Example) -> Example | None:
+            try:
+                return self.critique_example(ex, spec)
+            except Exception as exc:
+                log.warning("critique failed for example %s: %s", ex.id, exc)
+                return None
+
+        scored: list[Example] = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(_critique_worker, ex): ex for ex in raw_examples}
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    scored.append(result)
+
+        passed = [ex for ex in scored if ex.passed_critique]
+
+        if scored and len(passed) == len(scored):
+            log.warning(
+                "100%% critique pass rate — consider raising critique_threshold to 7.0"
+            )
+
+        return passed
+
+    # ------------------------------------------------------------------
+    # Fill-up and balancing helpers
     # ------------------------------------------------------------------
 
     def _fill_up_labels(
@@ -177,8 +206,7 @@ class TaskTemplate(ABC):
         max_attempts_multiplier: float,
         personas: list[Persona],
         spec: TaskSpec,
-        gen_worker: Any,
-        critique_worker: Any,
+        max_workers: int,
     ) -> list[Example]:
         """One extra generate+critique pass targeting labels below their quota."""
         from collections import Counter
@@ -197,27 +225,10 @@ class TaskTemplate(ABC):
         if not extra_nodes:
             return passed
 
-        max_workers = int(os.environ.get("TESSERA_MAX_CONCURRENT", "10"))
-        print(f"[tessera] fill-up: {len(extra_nodes)} extra nodes for underrepresented labels")
-
-        extra_raw: list[Example] = []
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            for future in as_completed([executor.submit(gen_worker, nd) for nd in extra_nodes]):
-                r = future.result()
-                if r is not None:
-                    extra_raw.append(r)
-
-        extra_passed: list[Example] = []
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            for future in as_completed([executor.submit(critique_worker, ex) for ex in extra_raw]):
-                r = future.result()
-                if r is not None and r.passed_critique:
-                    extra_passed.append(r)
-
+        log.info("fill-up: %d extra nodes for underrepresented labels", len(extra_nodes))
+        extra_raw = self._run_generation_phase(extra_nodes, personas, spec, max_workers)
+        extra_passed = self._run_critique_phase(extra_raw, spec, max_workers)
         return passed + extra_passed
-
-    def _task_type(self) -> TaskType:
-        raise NotImplementedError("subclass must override _task_type()")
 
     @staticmethod
     def _sample_nodes_balanced(taxonomy: Taxonomy, n: int) -> list[Any]:
@@ -256,7 +267,6 @@ class TaskTemplate(ABC):
         if not examples:
             return []
 
-        # Non-classification tasks: simple trim
         if any(ex.label is None for ex in examples):
             return examples[:n]
 

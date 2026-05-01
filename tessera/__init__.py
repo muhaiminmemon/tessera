@@ -18,6 +18,14 @@ from dotenv import load_dotenv
 # Always load .env from the repo root, regardless of where Python is invoked from.
 load_dotenv(Path(__file__).parent.parent / ".env")
 
+from tessera.core.exceptions import (
+    ConfigurationError,
+    CritiqueError,
+    DeduplicationError,
+    GenerationError,
+    TaxonomyError,
+    TesseraError,
+)
 from tessera.core.models import (
     ClassificationSpec,
     ExtractionSpec,
@@ -30,7 +38,18 @@ from tessera.core.personas import get_all_personas
 from tessera.tasks.qa import QATask
 
 __version__ = "0.1.0"
-__all__ = ["generate", "QATask", "__version__"]
+__all__ = [
+    "generate",
+    "QATask",
+    "__version__",
+    # Exceptions
+    "TesseraError",
+    "ConfigurationError",
+    "GenerationError",
+    "CritiqueError",
+    "TaxonomyError",
+    "DeduplicationError",
+]
 
 
 def generate(

@@ -1,10 +1,13 @@
 """Unified LLM client that routes to OpenAI, Anthropic, Together, or Groq."""
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from dataclasses import dataclass, field
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -48,7 +51,10 @@ class UsageStats:
             self.calls += 1
             p_cost, c_cost = _lookup_cost(model)
             self.cost_usd += (prompt_tokens * p_cost + completion_tokens * c_cost) / 1_000_000
-            print(f"[tessera:cost] model={model!r} prompt={prompt_tokens} completion={completion_tokens} running_total=${self.cost_usd:.6f}")
+            log.debug(
+                "cost model=%r prompt=%d completion=%d running_total=$%.6f",
+                model, prompt_tokens, completion_tokens, self.cost_usd,
+            )
 
 
 class LLMClient:

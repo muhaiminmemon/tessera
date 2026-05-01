@@ -1,9 +1,11 @@
 """QA task: orchestrates pipeline modules for question answering and RAG evaluation."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from tessera.core.base import TaskTemplate
+from tessera.core.exceptions import ConfigurationError
 from tessera.core.models import (
     Example,
     GenerationResult,
@@ -19,6 +21,8 @@ from tessera.pipeline.critique import CritiqueEngine
 from tessera.pipeline.dedup import DedupEngine
 from tessera.pipeline.generation import GenerationEngine
 from tessera.pipeline.taxonomy import TaxonomyExpander
+
+log = logging.getLogger(__name__)
 
 
 class QATask(TaskTemplate):
@@ -42,13 +46,19 @@ class QATask(TaskTemplate):
         return TaskType.QA
 
     def build_taxonomy(self, spec: TaskSpec) -> Taxonomy:
-        assert isinstance(spec, QASpec)
+        if not isinstance(spec, QASpec):
+            raise ConfigurationError(
+                f"QATask requires QASpec, got {type(spec).__name__}"
+            )
         return self._expander.expand(spec, TaskType.QA, model=self.model)
 
     def generate_example(
         self, node: Any, persona: Persona, spec: TaskSpec
     ) -> Example:
-        assert isinstance(spec, QASpec)
+        if not isinstance(spec, QASpec):
+            raise ConfigurationError(
+                f"QATask requires QASpec, got {type(spec).__name__}"
+            )
         results = self._generator.generate_batch(
             nodes=[node],
             personas=[persona],
@@ -62,7 +72,10 @@ class QATask(TaskTemplate):
         return results[0]
 
     def critique_example(self, example: Example, spec: TaskSpec) -> Example:
-        assert isinstance(spec, QASpec)
+        if not isinstance(spec, QASpec):
+            raise ConfigurationError(
+                f"QATask requires QASpec, got {type(spec).__name__}"
+            )
         scores = self._critiquer.score(
             example=example,
             spec=spec,
@@ -91,12 +104,11 @@ class QATask(TaskTemplate):
                 }
                 for ex in examples
             ]
-        elif fmt == "squad":
+        if fmt == "squad":
             rows = []
             for ex in examples:
                 context = ex.context or ""
                 answer = ex.answer or ""
-                # Character offset; -1 when answer is not a direct span (abstractive/unanswerable)
                 answer_start = context.find(answer)
                 rows.append(
                     {
@@ -112,7 +124,7 @@ class QATask(TaskTemplate):
                     }
                 )
             return rows
-        elif fmt == "alpaca":
+        if fmt == "alpaca":
             return [
                 {
                     "instruction": (
@@ -125,8 +137,7 @@ class QATask(TaskTemplate):
                 }
                 for ex in examples
             ]
-        else:
-            raise ValueError(f"Unknown format '{fmt}'. Choose from: jsonl, squad, alpaca")
+        raise ValueError(f"Unknown format '{fmt}'. Choose from: jsonl, squad, alpaca")
 
     def to_qa_result(self, result: GenerationResult) -> QAGenerationResult:
         """Convert a GenerationResult (internal Examples) to a typed QAGenerationResult."""

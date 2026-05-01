@@ -1,9 +1,11 @@
 """Instruction task: orchestrates pipeline modules for instruction-following."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from tessera.core.base import TaskTemplate
+from tessera.core.exceptions import ConfigurationError
 from tessera.core.models import (
     Example,
     InstructionSpec,
@@ -16,6 +18,8 @@ from tessera.pipeline.critique import CritiqueEngine
 from tessera.pipeline.dedup import DedupEngine
 from tessera.pipeline.generation import GenerationEngine
 from tessera.pipeline.taxonomy import TaxonomyExpander
+
+log = logging.getLogger(__name__)
 
 
 class InstructionTask(TaskTemplate):
@@ -39,13 +43,19 @@ class InstructionTask(TaskTemplate):
         return TaskType.INSTRUCTION
 
     def build_taxonomy(self, spec: TaskSpec) -> Taxonomy:
-        assert isinstance(spec, InstructionSpec)
+        if not isinstance(spec, InstructionSpec):
+            raise ConfigurationError(
+                f"InstructionTask requires InstructionSpec, got {type(spec).__name__}"
+            )
         return self._expander.expand(spec, TaskType.INSTRUCTION, model=self.model)
 
     def generate_example(
         self, node: Any, persona: Persona, spec: TaskSpec
     ) -> Example:
-        assert isinstance(spec, InstructionSpec)
+        if not isinstance(spec, InstructionSpec):
+            raise ConfigurationError(
+                f"InstructionTask requires InstructionSpec, got {type(spec).__name__}"
+            )
         results = self._generator.generate_batch(
             nodes=[node],
             personas=[persona],
@@ -59,7 +69,10 @@ class InstructionTask(TaskTemplate):
         return results[0]
 
     def critique_example(self, example: Example, spec: TaskSpec) -> Example:
-        assert isinstance(spec, InstructionSpec)
+        if not isinstance(spec, InstructionSpec):
+            raise ConfigurationError(
+                f"InstructionTask requires InstructionSpec, got {type(spec).__name__}"
+            )
         scores = self._critiquer.score(
             example=example,
             spec=spec,
@@ -85,7 +98,7 @@ class InstructionTask(TaskTemplate):
                 }
                 for ex in examples
             ]
-        elif fmt == "sharegpt":
+        if fmt == "sharegpt":
             return [
                 {
                     "conversations": [
@@ -95,13 +108,12 @@ class InstructionTask(TaskTemplate):
                 }
                 for ex in examples
             ]
-        elif fmt == "jsonl":
+        if fmt == "jsonl":
             return [
                 {"instruction": ex.instruction, "response": ex.response}
                 for ex in examples
             ]
-        else:
-            raise ValueError(f"Unknown format '{fmt}'. Choose from: jsonl, alpaca, sharegpt")
+        raise ValueError(f"Unknown format '{fmt}'. Choose from: jsonl, alpaca, sharegpt")
 
     def validate_downstream(
         self, train: list[Example], test: list[Example]

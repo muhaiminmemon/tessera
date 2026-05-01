@@ -2,33 +2,59 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Callable
 
+from tessera.core import config as _cfg
+from tessera.core import prompts
+from tessera.core.exceptions import GenerationError
 from tessera.core.llm_client import get_client
 from tessera.core.models import (
+    ClassificationSpec,
     Example,
+    ExtractionSpec,
+    InstructionSpec,
     Persona,
+    QASpec,
     TaskSpec,
     TaskType,
     TaxonomyNode,
-    ClassificationSpec,
-    ExtractionSpec,
-    InstructionSpec,
-    QASpec,
 )
-from tessera.core import prompts
+
+log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Dispatch table for prompt builders (system_fn, user_fn).
+# QA is excluded because it requires two sequential LLM calls.
+# ---------------------------------------------------------------------------
+
+_PromptPair = tuple[Callable[..., str], Callable[..., str]]
+
+_GEN_PROMPTS: dict[TaskType, _PromptPair] = {
+    TaskType.CLASSIFICATION: (
+        prompts.classification_generation_system,
+        prompts.classification_generation_user,
+    ),
+    TaskType.EXTRACTION: (
+        prompts.extraction_generation_system,
+        prompts.extraction_generation_user,
+    ),
+    TaskType.INSTRUCTION: (
+        prompts.instruction_generation_system,
+        prompts.instruction_generation_user,
+    ),
+}
 
 
 def _parse_json(raw: str) -> dict:
     """Parse JSON from LLM output, stripping markdown fences if present."""
     text = raw.strip()
-    # Strip ```json ... ``` or ``` ... ``` fences
     if text.startswith("```"):
         lines = text.splitlines()
-        # drop first and last fence lines
-        inner = [l for l in lines[1:] if l.strip() != "```"]
+        inner = [ln for ln in lines[1:] if ln.strip() != "```"]
         text = "\n".join(inner).strip()
     return json.loads(text)
 
@@ -47,14 +73,14 @@ class GenerationEngine:
         client = get_client()
         target = n if n is not None else len(nodes)
         sample = nodes[:target]
-        max_workers = int(os.environ.get("TESSERA_MAX_CONCURRENT", "10"))
+        max_workers = _cfg.max_concurrent()
 
         def _worker(node: TaxonomyNode) -> Example | None:
             persona = random.choice(personas)
             try:
                 return self._generate_one(client, node, persona, spec, task_type, model)
             except Exception as exc:
-                print(f"[GenerationEngine] failed node={node.id} persona={persona.name}: {exc}")
+                log.warning("generation failed node=%s persona=%s: %s", node.id, persona.name, exc)
                 return None
 
         examples: list[Example] = []
@@ -78,112 +104,131 @@ class GenerationEngine:
     ) -> Example:
         from tessera.core.llm_client import LLMClient
 
-        assert isinstance(client, LLMClient)
+        if not isinstance(client, LLMClient):
+            raise GenerationError(f"Expected LLMClient, got {type(client).__name__}")
 
-        # QA makes two sequential LLM calls (context then QA pair) so it is
-        # handled as a full early-return before the shared single-call path.
+        # QA requires two sequential calls — handle before the shared single-call path.
         if task_type == TaskType.QA:
-            assert isinstance(spec, QASpec)
-            ctx_raw = client.complete(
-                model=model,
-                system=prompts.qa_context_generation_system(node, persona, spec),
-                user=prompts.qa_context_generation_user(node, persona, spec),
-                temperature=0.9,
-                max_tokens=600,
-                json_mode=True,
-            )
-            context = _parse_json(ctx_raw).get("context", "").strip()
-            if not context:
-                raise ValueError("LLM returned empty context field")
-            question_type = node.target_label
-            qa_raw = client.complete(
-                model=model,
-                system=prompts.qa_pair_generation_system(spec),
-                user=prompts.qa_pair_generation_user(context, question_type),
-                temperature=0.7,
-                max_tokens=400,
-                json_mode=True,
-            )
-            qa_data = _parse_json(qa_raw)
-            question = qa_data.get("question", "").strip()
-            answer = qa_data.get("answer", "").strip()
-            if not question or not answer:
-                raise ValueError("LLM returned empty question or answer")
-            difficulty = qa_data.get("difficulty", "medium").strip()
-            return Example(
-                task_type=task_type,
-                context=context,
-                question=question,
-                answer=answer,
-                question_type=question_type,
-                difficulty=difficulty,
-                label=question_type,
-                taxonomy_node_id=node.id,
-                persona_id=persona.id,
-                model_used=model,
-            )
+            return self._generate_qa(client, node, persona, spec, model)
 
-        if task_type == TaskType.CLASSIFICATION:
-            assert isinstance(spec, ClassificationSpec)
-            sys_msg = prompts.classification_generation_system(node, persona, spec)
-            usr_msg = prompts.classification_generation_user(node, persona, spec)
-        elif task_type == TaskType.EXTRACTION:
-            assert isinstance(spec, ExtractionSpec)
-            sys_msg = prompts.extraction_generation_system(node, persona, spec)
-            usr_msg = prompts.extraction_generation_user(node, persona, spec)
-        elif task_type == TaskType.INSTRUCTION:
-            assert isinstance(spec, InstructionSpec)
-            sys_msg = prompts.instruction_generation_system(node, persona, spec)
-            usr_msg = prompts.instruction_generation_user(node, persona, spec)
-        else:
-            raise ValueError(f"Unknown task_type: {task_type}")
+        if task_type not in _GEN_PROMPTS:
+            raise GenerationError(f"Unknown task_type: {task_type}")
 
+        sys_fn, usr_fn = _GEN_PROMPTS[task_type]
         raw = client.complete(
             model=model,
-            system=sys_msg,
-            user=usr_msg,
-            temperature=0.9,
+            system=sys_fn(node, persona, spec),
+            user=usr_fn(node, persona, spec),
+            temperature=_cfg.GENERATION_TEMPERATURE,
             max_tokens=1024,
             json_mode=True,
         )
 
         data = _parse_json(raw)
+        return self._build_example(task_type, data, node, persona, spec, model)
+
+    # ------------------------------------------------------------------
+    # Per-task example construction helpers
+    # ------------------------------------------------------------------
+
+    def _generate_qa(
+        self,
+        client: object,
+        node: TaxonomyNode,
+        persona: Persona,
+        spec: TaskSpec,
+        model: str,
+    ) -> Example:
+        from tessera.core.llm_client import LLMClient
+
+        if not isinstance(spec, QASpec):
+            raise GenerationError(f"Expected QASpec for QA task, got {type(spec).__name__}")
+        if not isinstance(client, LLMClient):
+            raise GenerationError(f"Expected LLMClient, got {type(client).__name__}")
+
+        ctx_raw = client.complete(
+            model=model,
+            system=prompts.qa_context_generation_system(node, persona, spec),
+            user=prompts.qa_context_generation_user(node, persona, spec),
+            temperature=_cfg.CONTEXT_GENERATION_TEMPERATURE,
+            max_tokens=600,
+            json_mode=True,
+        )
+        context = _parse_json(ctx_raw).get("context", "").strip()
+        if not context:
+            raise GenerationError("LLM returned empty context field")
+
+        question_type = node.target_label
+        qa_raw = client.complete(
+            model=model,
+            system=prompts.qa_pair_generation_system(spec),
+            user=prompts.qa_pair_generation_user(context, question_type),
+            temperature=_cfg.QA_PAIR_TEMPERATURE,
+            max_tokens=400,
+            json_mode=True,
+        )
+        qa_data = _parse_json(qa_raw)
+        question = qa_data.get("question", "").strip()
+        answer = qa_data.get("answer", "").strip()
+        if not question or not answer:
+            raise GenerationError("LLM returned empty question or answer")
+
+        return Example(
+            task_type=TaskType.QA,
+            context=context,
+            question=question,
+            answer=answer,
+            question_type=question_type,
+            difficulty=qa_data.get("difficulty", "medium").strip(),
+            label=question_type,
+            taxonomy_node_id=node.id,
+            persona_id=persona.id,
+            model_used=model,
+        )
+
+    @staticmethod
+    def _build_example(
+        task_type: TaskType,
+        data: dict,
+        node: TaxonomyNode,
+        persona: Persona,
+        spec: TaskSpec,
+        model: str,
+    ) -> Example:
+        """Construct an Example from parsed LLM JSON for non-QA task types."""
+        common = dict(
+            task_type=task_type,
+            taxonomy_node_id=node.id,
+            persona_id=persona.id,
+            model_used=model,
+        )
 
         if task_type == TaskType.CLASSIFICATION:
-            assert isinstance(spec, ClassificationSpec)
-            label = data.get("label", "")
-            # Fall back to the node's target_label rather than discarding the example.
-            if label not in spec.labels:
-                label = node.target_label
+            if not isinstance(spec, ClassificationSpec):
+                raise GenerationError(
+                    f"Expected ClassificationSpec, got {type(spec).__name__}"
+                )
             text = data.get("text", "").strip()
             if not text:
-                raise ValueError("LLM returned empty text field")
-            return Example(
-                task_type=task_type,
-                text=text,
-                label=label,
-                taxonomy_node_id=node.id,
-                persona_id=persona.id,
-                model_used=model,
-            )
-        elif task_type == TaskType.EXTRACTION:
+                raise GenerationError("LLM returned empty text field")
+            label = data.get("label", "")
+            if label not in spec.labels:
+                label = node.target_label
+            return Example(**common, text=text, label=label)
+
+        if task_type == TaskType.EXTRACTION:
             extracted = data.get("extracted_fields", {})
             if isinstance(extracted, list):
                 extracted = extracted[0] if extracted else {}
             return Example(
-                task_type=task_type,
+                **common,
                 source_text=data["source_text"],
                 extracted_fields=extracted,
-                taxonomy_node_id=node.id,
-                persona_id=persona.id,
-                model_used=model,
             )
-        else:  # INSTRUCTION
-            return Example(
-                task_type=task_type,
-                instruction=data["instruction"],
-                response=data["response"],
-                taxonomy_node_id=node.id,
-                persona_id=persona.id,
-                model_used=model,
-            )
+
+        # INSTRUCTION
+        return Example(
+            **common,
+            instruction=data["instruction"],
+            response=data["response"],
+        )

@@ -1,10 +1,12 @@
 """Classification task: orchestrates pipeline modules for text classification."""
 from __future__ import annotations
 
+import logging
 import json
 from typing import Any
 
 from tessera.core.base import TaskTemplate
+from tessera.core.exceptions import ConfigurationError
 from tessera.core.models import (
     ClassificationSpec,
     Example,
@@ -17,6 +19,8 @@ from tessera.pipeline.critique import CritiqueEngine
 from tessera.pipeline.dedup import DedupEngine
 from tessera.pipeline.generation import GenerationEngine
 from tessera.pipeline.taxonomy import TaxonomyExpander
+
+log = logging.getLogger(__name__)
 
 
 class ClassificationTask(TaskTemplate):
@@ -40,13 +44,19 @@ class ClassificationTask(TaskTemplate):
         return TaskType.CLASSIFICATION
 
     def build_taxonomy(self, spec: TaskSpec) -> Taxonomy:
-        assert isinstance(spec, ClassificationSpec)
+        if not isinstance(spec, ClassificationSpec):
+            raise ConfigurationError(
+                f"ClassificationTask requires ClassificationSpec, got {type(spec).__name__}"
+            )
         return self._expander.expand(spec, TaskType.CLASSIFICATION, model=self.model)
 
     def generate_example(
         self, node: Any, persona: Persona, spec: TaskSpec
     ) -> Example:
-        assert isinstance(spec, ClassificationSpec)
+        if not isinstance(spec, ClassificationSpec):
+            raise ConfigurationError(
+                f"ClassificationTask requires ClassificationSpec, got {type(spec).__name__}"
+            )
         results = self._generator.generate_batch(
             nodes=[node],
             personas=[persona],
@@ -60,7 +70,10 @@ class ClassificationTask(TaskTemplate):
         return results[0]
 
     def critique_example(self, example: Example, spec: TaskSpec) -> Example:
-        assert isinstance(spec, ClassificationSpec)
+        if not isinstance(spec, ClassificationSpec):
+            raise ConfigurationError(
+                f"ClassificationTask requires ClassificationSpec, got {type(spec).__name__}"
+            )
         scores = self._critiquer.score(
             example=example,
             spec=spec,
@@ -79,7 +92,7 @@ class ClassificationTask(TaskTemplate):
     ) -> list[dict[str, Any]]:
         if fmt == "jsonl":
             return [{"text": ex.text, "label": ex.label} for ex in examples]
-        elif fmt == "alpaca":
+        if fmt == "alpaca":
             return [
                 {
                     "instruction": "Classify the following text.",
@@ -88,7 +101,7 @@ class ClassificationTask(TaskTemplate):
                 }
                 for ex in examples
             ]
-        elif fmt == "sharegpt":
+        if fmt == "sharegpt":
             return [
                 {
                     "conversations": [
@@ -98,8 +111,7 @@ class ClassificationTask(TaskTemplate):
                 }
                 for ex in examples
             ]
-        else:
-            raise ValueError(f"Unknown format '{fmt}'. Choose from: jsonl, alpaca, sharegpt")
+        raise ValueError(f"Unknown format '{fmt}'. Choose from: jsonl, alpaca, sharegpt")
 
     def validate_downstream(
         self, train: list[Example], test: list[Example]

@@ -1,10 +1,13 @@
 """Deduplication engine using sentence-transformers + ChromaDB."""
 from __future__ import annotations
 
+import logging
 import uuid
 import warnings
 
 from tessera.core.models import Example, TaskType
+
+log = logging.getLogger(__name__)
 
 
 class DedupEngine:
@@ -41,7 +44,9 @@ class DedupEngine:
             return examples
 
         try:
-            return self._dedup_chromadb(examples, threshold)
+            result = self._dedup_chromadb(examples, threshold)
+            log.info("dedup: %d → %d examples (threshold=%.2f)", len(examples), len(result), threshold)
+            return result
         except ImportError:
             warnings.warn(
                 "[DedupEngine] chromadb not installed; falling back to no dedup. "

@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from tessera.core.base import TaskTemplate
+from tessera.core.exceptions import ConfigurationError
 from tessera.core.models import (
     Example,
     ExtractionSpec,
@@ -17,6 +19,8 @@ from tessera.pipeline.critique import CritiqueEngine
 from tessera.pipeline.dedup import DedupEngine
 from tessera.pipeline.generation import GenerationEngine
 from tessera.pipeline.taxonomy import TaxonomyExpander
+
+log = logging.getLogger(__name__)
 
 
 class ExtractionTask(TaskTemplate):
@@ -40,13 +44,19 @@ class ExtractionTask(TaskTemplate):
         return TaskType.EXTRACTION
 
     def build_taxonomy(self, spec: TaskSpec) -> Taxonomy:
-        assert isinstance(spec, ExtractionSpec)
+        if not isinstance(spec, ExtractionSpec):
+            raise ConfigurationError(
+                f"ExtractionTask requires ExtractionSpec, got {type(spec).__name__}"
+            )
         return self._expander.expand(spec, TaskType.EXTRACTION, model=self.model)
 
     def generate_example(
         self, node: Any, persona: Persona, spec: TaskSpec
     ) -> Example:
-        assert isinstance(spec, ExtractionSpec)
+        if not isinstance(spec, ExtractionSpec):
+            raise ConfigurationError(
+                f"ExtractionTask requires ExtractionSpec, got {type(spec).__name__}"
+            )
         results = self._generator.generate_batch(
             nodes=[node],
             personas=[persona],
@@ -60,14 +70,16 @@ class ExtractionTask(TaskTemplate):
         return results[0]
 
     def critique_example(self, example: Example, spec: TaskSpec) -> Example:
-        assert isinstance(spec, ExtractionSpec)
+        if not isinstance(spec, ExtractionSpec):
+            raise ConfigurationError(
+                f"ExtractionTask requires ExtractionSpec, got {type(spec).__name__}"
+            )
         scores = self._critiquer.score(
             example=example,
             spec=spec,
             task_type=TaskType.EXTRACTION,
             model=self.critique_model,
         )
-        # For extraction: check field completeness alongside LLM scores
         all_fields_present = all(
             k in (example.extracted_fields or {})
             for k in spec.schema_definition
@@ -94,7 +106,7 @@ class ExtractionTask(TaskTemplate):
                 }
                 for ex in examples
             ]
-        elif fmt in ("alpaca", "sharegpt"):
+        if fmt in ("alpaca", "sharegpt"):
             rows = []
             for ex in examples:
                 system = (
@@ -103,7 +115,7 @@ class ExtractionTask(TaskTemplate):
                 )
                 instruction = (
                     f"{ex.source_text}\n\n"
-                    f"Extract all fields and return JSON."
+                    "Extract all fields and return JSON."
                 )
                 output = json.dumps(ex.extracted_fields, ensure_ascii=False)
                 if fmt == "alpaca":
@@ -121,8 +133,7 @@ class ExtractionTask(TaskTemplate):
                         }
                     )
             return rows
-        else:
-            raise ValueError(f"Unknown format '{fmt}'. Choose from: jsonl, alpaca, sharegpt")
+        raise ValueError(f"Unknown format '{fmt}'. Choose from: jsonl, alpaca, sharegpt")
 
     def validate_downstream(
         self, train: list[Example], test: list[Example]
