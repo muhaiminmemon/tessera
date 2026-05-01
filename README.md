@@ -33,24 +33,6 @@ Tessera generates that data automatically. You describe what you need in plain t
 
 ## Benchmark results
 
-> All experiments fine-tune `unsloth/Llama-3.2-3B-Instruct` with LoRA (`r=16`, 3 epochs).
-> Generation uses `gpt-4o-mini`. Critique threshold: 7.0–7.5 depending on task.
-
-**Cost to reach equivalent quality — Tessera vs. human annotation:**
-
-```mermaid
-xychart-beta
-    title "Cost: Human Annotation vs. Tessera Synthetic ($USD)"
-    x-axis ["Banking77 (1,246 ex.)", "SQuAD QA (137 ex.)", "RAG Eval (150 ex.)", "Python Instr. (~317 ex.)"]
-    y-axis "Cost (USD)" 0 --> 320
-    bar [300, 30, 25, 20]
-    line [0.40, 0.19, 0.19, 0.30]
-```
-
-*Bars = human annotation cost estimate. Line = Tessera cost.*
-
----
-
 ### Banking77 Intent Classification
 
 Fine-tuned `Llama-3.2-3B` on 1,246 Tessera-generated examples vs. real human-labeled Banking77 data.
@@ -133,34 +115,6 @@ Extraction is the hardest task type — the model simultaneously learns entity i
 | Enterprise RAG eval | Hallucination refusal | **98% accuracy** | $0.19 |
 | Python instruction | ROUGE-L | **+26.85% over zero-shot** | ~$0.30 |
 | DocRED extraction | Macro F1 | 31.8% of real-data | ~$0.50 |
-
-**Tessera vs. Real Data — % of human-annotated baseline achieved:**
-
-```mermaid
-xychart-beta
-    title "Tessera Synthetic vs. Real Human-Annotated Data (%)"
-    x-axis ["Banking77\n(Class.)", "SQuAD QA\n(Fine-tune)", "RAG Eval\n(Unanswerable)", "Python\n(Instruction)", "DocRED\n(Extraction)"]
-    y-axis "% of Real Data Performance" 0 --> 100
-    bar [97.1, 72.5, 98.0, 73.0, 31.8]
-```
-
-### Evaluation metrics
-
-All classification and extraction benchmarks use **macro F1**:
-
-$$F_1 = \frac{1}{|C|} \sum_{c \in C} 2 \cdot \frac{\text{precision}_c \cdot \text{recall}_c}{\text{precision}_c + \text{recall}_c}$$
-
-QA benchmarks (SQuAD) use **token-level F1** — the harmonic mean of token precision and recall between the predicted and gold answer spans:
-
-$$F_1^{\text{token}} = \frac{2 \cdot |\text{pred} \cap \text{gold}|}{|\text{pred}| + |\text{gold}|}$$
-
-Instruction-following uses **ROUGE-L** — the longest common subsequence recall between the generated and reference response:
-
-$$\text{ROUGE-L} = \frac{\text{LCS}(\text{pred}, \text{ref})}{|\text{ref}|}$$
-
-Critique scoring uses a **mean of three axes** with a configurable pass threshold $\tau$:
-
-$$\bar{s} = \frac{s_{\text{realism}} + s_{\text{correctness}} + s_{\text{specificity}}}{3} \geq \tau \quad (\tau \in \{7.0,\ 7.5\})$$
 
 ---
 
@@ -379,35 +333,79 @@ tessera validate \
 
 Tessera runs a 6-stage pipeline. Each stage is independently configurable and all generation is parallel (configurable via `TESSERA_MAX_CONCURRENT`).
 
-```mermaid
-flowchart TD
-    A(["Task Spec\ndomain · labels · schema · question_types"]) --> B
-
-    B["Stage 1 — Taxonomy Expansion\nLLM generates 40–60 diverse scenario nodes\nbalanced across all labels"]
-    B --> C
-
-    C["Stage 2 — Persona-based Generation\n60 curated personas × taxonomy nodes\nParallel threads · 2.5× oversampling"]
-    C --> D
-
-    D{"Stage 3 — Multi-axis Self-Critique\nScores each example on 3 axes · 0–10\nrealism · label_correctness · specificity\nMean >= 7.0 / 7.5 to pass"}
-    D -->|pass| E
-    D -->|fail| X(["Discarded"])
-
-    E["Stage 4 — Embedding Deduplication\nall-MiniLM-L6-v2 + ChromaDB\nCosine similarity >= threshold removed"]
-    E --> F
-
-    F["Stage 5 — Hard-Negative Mining\nLogisticRegression on embeddings\nOversample near-boundary examples"]
-    F --> G
-
-    G["Stage 6 — Downstream Validation\nUnsloth LoRA · Llama-3.2-3B · r=16\nF1 / ROUGE-L / Token F1 vs real data"]
-    G --> H
-
-    H(["Output\nJSONL · Alpaca · ShareGPT · SQuAD"])
-
-    style A fill:#1e293b,color:#e2e8f0,stroke:#334155
-    style H fill:#14532d,color:#dcfce7,stroke:#166534
-    style X fill:#450a0a,color:#fecaca,stroke:#991b1b
-    style D fill:#1e3a5f,color:#bfdbfe,stroke:#1d4ed8
+```
+Your spec (domain, labels / schema / question_types)
+         │
+         ▼
+┌─────────────────────────────────────────┐
+│  Stage 1 — Taxonomy Expansion           │
+│                                         │
+│  LLM generates 40-60 diverse scenario   │
+│  nodes from your spec. Each node has    │
+│  a category, subcategory, scenario,     │
+│  and target label. Balanced across      │
+│  all labels automatically.              │
+└────────────────────┬────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────┐
+│  Stage 2 — Persona-based Generation     │
+│                                         │
+│  60 curated personas (expert→novice,    │
+│  formal→casual, diverse cultural        │
+│  contexts) × taxonomy nodes → raw       │
+│  Examples in parallel threads.          │
+└────────────────────┬────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────┐
+│  Stage 3 — Multi-axis Self-Critique     │
+│                                         │
+│  A second LLM call scores each example  │
+│  on 3 axes (0–10 each):                 │
+│    • realism / groundedness             │
+│    • label_correctness / clarity        │
+│    • specificity / completeness         │
+│  Mean < threshold → discarded.          │
+│  Thresholds: 7.0 (class/instr),         │
+│              7.5 (extraction/QA)        │
+└────────────────────┬────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────┐
+│  Stage 4 — Embedding Deduplication      │
+│                                         │
+│  all-MiniLM-L6-v2 + ChromaDB removes    │
+│  near-duplicate examples                │
+│  (cosine similarity ≥ threshold).       │
+│  QA deduplicates on question text only  │
+│  to catch semantically identical        │
+│  questions across different contexts.   │
+└────────────────────┬────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────┐
+│  Stage 5 — Hard-Negative Mining         │
+│                                         │
+│  LogisticRegression on embeddings       │
+│  identifies near-boundary examples      │
+│  (confusable between labels) and        │
+│  oversamples them. Sharpens decision    │
+│  boundaries without more LLM calls.     │
+└────────────────────┬────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────┐
+│  Stage 6 — Downstream Validation        │
+│                                         │
+│  Optional: Unsloth LoRA fine-tune       │
+│  (Llama-3.2-3B, r=16, 3 epochs) →       │
+│  F1 / ROUGE-L / token F1 vs held-out    │
+│  test set and real-data baseline.       │
+└─────────────────────────────────────────┘
+         │
+         ▼
+  JSONL / Alpaca / ShareGPT / SQuAD
 ```
 
 ---
