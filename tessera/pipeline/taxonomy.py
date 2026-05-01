@@ -9,6 +9,7 @@ from tessera.core.models import (
     ClassificationSpec,
     ExtractionSpec,
     InstructionSpec,
+    QASpec,
     TaskSpec,
     TaskType,
     Taxonomy,
@@ -38,6 +39,10 @@ class TaxonomyExpander:
             assert isinstance(spec, InstructionSpec)
             sys_msg = prompts.instruction_taxonomy_system(spec)
             usr_msg = prompts.instruction_taxonomy_user(spec)
+        elif task_type == TaskType.QA:
+            assert isinstance(spec, QASpec)
+            sys_msg = prompts.qa_taxonomy_system(spec)
+            usr_msg = prompts.qa_taxonomy_user(spec)
         else:
             raise ValueError(f"Unknown task_type: {task_type}")
 
@@ -86,6 +91,13 @@ class TaxonomyExpander:
                 if not taxonomy.nodes_for_label(itype):
                     warnings.warn(
                         f"[TaxonomyExpander] instruction_type '{itype}' has no taxonomy nodes."
+                    )
+        elif task_type == TaskType.QA:
+            assert isinstance(spec, QASpec)
+            for qt in spec.question_types:
+                if not taxonomy.nodes_for_label(qt):
+                    warnings.warn(
+                        f"[TaxonomyExpander] question_type '{qt}' has no taxonomy nodes."
                     )
 
         return taxonomy

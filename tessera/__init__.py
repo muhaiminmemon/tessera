@@ -23,12 +23,14 @@ from tessera.core.models import (
     ExtractionSpec,
     GenerationResult,
     InstructionSpec,
+    QASpec,
     TaskType,
 )
 from tessera.core.personas import get_all_personas
+from tessera.tasks.qa import QATask
 
 __version__ = "0.1.0"
-__all__ = ["generate", "__version__"]
+__all__ = ["generate", "QATask", "__version__"]
 
 
 def generate(
@@ -36,7 +38,7 @@ def generate(
     spec_dict: dict[str, Any],
     n_examples: int = 1000,
     model: Optional[str] = None,
-    critique_threshold: float = 6.0,
+    critique_threshold: Optional[float] = None,
     output_format: str = "jsonl",
     output_path: Optional[str] = None,
 ) -> GenerationResult:
@@ -55,6 +57,8 @@ def generate(
         LLM model name. Defaults to TESSERA_DEFAULT_MODEL env var or gpt-4o-mini.
     critique_threshold:
         Minimum mean critique score (0-10) for an example to pass.
+        Defaults to None, which uses each task's built-in default
+        (classification: 7.0, extraction: 7.5, instruction: 7.0).
     output_format:
         "jsonl", "alpaca", or "sharegpt".
     output_path:
@@ -81,8 +85,14 @@ def generate(
     elif task_type == TaskType.INSTRUCTION:
         spec = InstructionSpec(**spec_dict)
         task_obj = InstructionTask(model=model, critique_model=model)
+    elif task_type == TaskType.QA:
+        spec = QASpec(**spec_dict)
+        task_obj = QATask(model=model, critique_model=model)
     else:
-        raise ValueError(f"Unknown task type: {task!r}. Choose from: classification, extraction, instruction")
+        raise ValueError(
+            f"Unknown task type: {task!r}. "
+            "Choose from: classification, extraction, instruction, qa"
+        )
 
     t0 = time.time()
     result = task_obj.run_pipeline(

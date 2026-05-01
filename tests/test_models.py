@@ -9,6 +9,9 @@ from tessera.core.models import (
     CritiqueScores,
     Example,
     Persona,
+    QAExample,
+    QAGenerationResult,
+    QASpec,
     Taxonomy,
     TaxonomyNode,
     TaskType,
@@ -133,8 +136,8 @@ class TestPersona:
         fragment = persona.to_prompt_fragment()
         assert "none" in fragment
 
-    def test_personas_list_has_50(self) -> None:
-        assert len(PERSONAS) == 50
+    def test_personas_list_has_60(self) -> None:
+        assert len(PERSONAS) == 60
 
     def test_all_personas_have_required_fields(self) -> None:
         for p in PERSONAS:
@@ -190,3 +193,196 @@ class TestTaxonomy:
         taxonomy = Taxonomy(task_type=TaskType.CLASSIFICATION)
         assert len(taxonomy) == 0
         assert taxonomy.nodes_for_label("x") == []
+
+
+class TestQASpec:
+    def test_valid_spec_default_question_types(self) -> None:
+        spec = QASpec(domain="medical records")
+        assert set(spec.question_types) == {"factoid", "multi-hop", "abstractive", "unanswerable"}
+        assert spec.language == "English"
+
+    def test_valid_spec_subset_question_types(self) -> None:
+        spec = QASpec(domain="legal contracts", question_types=["factoid", "unanswerable"])
+        assert spec.question_types == ["factoid", "unanswerable"]
+
+    def test_invalid_question_type_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="Invalid question_types"):
+            QASpec(domain="test", question_types=["factoid", "open-ended"])
+
+    def test_empty_question_types_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            QASpec(domain="test", question_types=[])
+
+    def test_single_question_type_allowed(self) -> None:
+        spec = QASpec(domain="finance", question_types=["multi-hop"])
+        assert spec.question_types == ["multi-hop"]
+
+
+class TestQAExample:
+    def test_valid_qa_example(self) -> None:
+        ex = QAExample(
+            context="The Eiffel Tower was built in 1889.",
+            question="When was the Eiffel Tower built?",
+            answer="1889",
+            question_type="factoid",
+            difficulty="easy",
+            label="factoid",
+        )
+        assert ex.context == "The Eiffel Tower was built in 1889."
+        assert ex.question_type == "factoid"
+        assert ex.difficulty == "easy"
+        assert ex.label == "factoid"
+
+    def test_default_difficulty_is_medium(self) -> None:
+        ex = QAExample(
+            context="Some passage.",
+            question="What is it?",
+            answer="It is something.",
+            question_type="abstractive",
+            label="abstractive",
+        )
+        assert ex.difficulty == "medium"
+
+    def test_id_is_auto_generated(self) -> None:
+        ex = QAExample(
+            context="ctx",
+            question="q?",
+            answer="a",
+            question_type="factoid",
+            label="factoid",
+        )
+        assert ex.id and len(ex.id) > 0
+
+    def test_squad_format_conversion(self) -> None:
+        """Verify the SQuAD-style dict structure produced by QATask.format_for_finetuning."""
+        from tessera.tasks.qa import QATask
+
+        task = QATask()
+        context = "Paris is the capital of France."
+        answer = "Paris"
+        examples = [
+            Example(
+                task_type=TaskType.QA,
+                context=context,
+                question="What is the capital of France?",
+                answer=answer,
+                question_type="factoid",
+                difficulty="easy",
+                label="factoid",
+            )
+        ]
+        rows = task.format_for_finetuning(examples, fmt="squad")
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["context"] == context
+        assert row["answers"]["text"] == [answer]
+        assert isinstance(row["answers"]["answer_start"], list)
+        assert row["answers"]["answer_start"][0] == context.find(answer)
+
+    def test_alpaca_format_conversion(self) -> None:
+        from tessera.tasks.qa import QATask
+
+        task = QATask()
+        examples = [
+            Example(
+                task_type=TaskType.QA,
+                context="Oxygen has atomic number 8.",
+                question="What is the atomic number of oxygen?",
+                answer="8",
+                question_type="factoid",
+                difficulty="easy",
+                label="factoid",
+            )
+        ]
+        rows = task.format_for_finetuning(examples, fmt="alpaca")
+        assert len(rows) == 1
+        assert "instruction" in rows[0]
+        assert "Context:" in rows[0]["input"]
+        assert rows[0]["output"] == "8"
+
+    def test_unknown_format_raises(self) -> None:
+        from tessera.tasks.qa import QATask
+
+        task = QATask()
+        with pytest.raises(ValueError, match="Unknown format"):
+            task.format_for_finetuning([], fmt="xml")
+
+
+class TestQAExampleValidation:
+    def test_invalid_question_type_on_example(self) -> None:
+        with pytest.raises(ValidationError, match="question_type must be one of"):
+            Example(
+                task_type=TaskType.QA,
+                context="Some context.",
+                question="What happened?",
+                answer="Something.",
+                question_type="open-book",
+            )
+
+    def test_invalid_difficulty_on_example(self) -> None:
+        with pytest.raises(ValidationError, match="difficulty must be one of"):
+            Example(
+                task_type=TaskType.QA,
+                context="Some context.",
+                question="What happened?",
+                answer="Something.",
+                question_type="factoid",
+                difficulty="trivial",
+            )
+
+    def test_missing_context_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="context is required"):
+            Example(
+                task_type=TaskType.QA,
+                question="What happened?",
+                answer="Something happened.",
+            )
+
+    def test_missing_question_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="question is required"):
+            Example(
+                task_type=TaskType.QA,
+                context="Some context.",
+                answer="Something happened.",
+            )
+
+    def test_missing_answer_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="answer is required"):
+            Example(
+                task_type=TaskType.QA,
+                context="Some context.",
+                question="What happened?",
+            )
+
+    def test_valid_unanswerable_example(self) -> None:
+        ex = Example(
+            task_type=TaskType.QA,
+            context="The meeting was held on Tuesday.",
+            question="Who attended the meeting?",
+            answer="This cannot be determined from the provided context.",
+            question_type="unanswerable",
+            difficulty="hard",
+            label="unanswerable",
+        )
+        assert ex.question_type == "unanswerable"
+        assert ex.difficulty == "hard"
+
+    def test_qa_generation_result_schema(self) -> None:
+        qa_ex = QAExample(
+            context="ctx",
+            question="q?",
+            answer="a",
+            question_type="multi-hop",
+            label="multi-hop",
+        )
+        result = QAGenerationResult(
+            spec={"domain": "test"},
+            examples=[qa_ex],
+            total_generated=10,
+            total_after_critique=8,
+            total_after_dedup=7,
+        )
+        assert result.task_type == TaskType.QA
+        assert len(result.examples) == 1
+        assert result.total_generated == 10
+        assert result.cost_usd == 0.0

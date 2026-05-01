@@ -16,6 +16,7 @@ from tessera.core.models import (
     ClassificationSpec,
     ExtractionSpec,
     InstructionSpec,
+    QASpec,
 )
 from tessera.core import prompts
 
@@ -79,6 +80,49 @@ class GenerationEngine:
 
         assert isinstance(client, LLMClient)
 
+        # QA makes two sequential LLM calls (context then QA pair) so it is
+        # handled as a full early-return before the shared single-call path.
+        if task_type == TaskType.QA:
+            assert isinstance(spec, QASpec)
+            ctx_raw = client.complete(
+                model=model,
+                system=prompts.qa_context_generation_system(node, persona, spec),
+                user=prompts.qa_context_generation_user(node, persona, spec),
+                temperature=0.9,
+                max_tokens=600,
+                json_mode=True,
+            )
+            context = _parse_json(ctx_raw).get("context", "").strip()
+            if not context:
+                raise ValueError("LLM returned empty context field")
+            question_type = node.target_label
+            qa_raw = client.complete(
+                model=model,
+                system=prompts.qa_pair_generation_system(spec),
+                user=prompts.qa_pair_generation_user(context, question_type),
+                temperature=0.7,
+                max_tokens=400,
+                json_mode=True,
+            )
+            qa_data = _parse_json(qa_raw)
+            question = qa_data.get("question", "").strip()
+            answer = qa_data.get("answer", "").strip()
+            if not question or not answer:
+                raise ValueError("LLM returned empty question or answer")
+            difficulty = qa_data.get("difficulty", "medium").strip()
+            return Example(
+                task_type=task_type,
+                context=context,
+                question=question,
+                answer=answer,
+                question_type=question_type,
+                difficulty=difficulty,
+                label=question_type,
+                taxonomy_node_id=node.id,
+                persona_id=persona.id,
+                model_used=model,
+            )
+
         if task_type == TaskType.CLASSIFICATION:
             assert isinstance(spec, ClassificationSpec)
             sys_msg = prompts.classification_generation_system(node, persona, spec)
@@ -109,7 +153,6 @@ class GenerationEngine:
             assert isinstance(spec, ClassificationSpec)
             label = data.get("label", "")
             # Fall back to the node's target_label rather than discarding the example.
-            # The node always carries a valid spec label, so this is safe.
             if label not in spec.labels:
                 label = node.target_label
             text = data.get("text", "").strip()

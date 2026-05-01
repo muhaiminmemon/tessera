@@ -14,6 +14,7 @@ from tessera.core.models import (
     ClassificationSpec,
     ExtractionSpec,
     InstructionSpec,
+    QASpec,
 )
 from tessera.core import prompts
 
@@ -40,6 +41,10 @@ class CritiqueEngine:
             assert isinstance(spec, InstructionSpec)
             sys_msg = prompts.instruction_critique_system(example, spec)
             usr_msg = prompts.instruction_critique_user(example, spec)
+        elif task_type == TaskType.QA:
+            assert isinstance(spec, QASpec)
+            sys_msg = prompts.qa_critique_system(example, spec)
+            usr_msg = prompts.qa_critique_user(example, spec)
         else:
             raise ValueError(f"Unknown task_type: {task_type}")
 
@@ -53,6 +58,16 @@ class CritiqueEngine:
         )
 
         data = json.loads(raw)
+
+        # QA critique returns groundedness/question_clarity/answer_completeness;
+        # map onto the three standard CritiqueScores axes.
+        if task_type == TaskType.QA:
+            return CritiqueScores(
+                realism=float(data.get("groundedness", 0)),
+                label_correctness=float(data.get("question_clarity", 0)),
+                specificity=float(data.get("answer_completeness", 0)),
+                reasoning=str(data.get("reasoning", "")),
+            )
 
         return CritiqueScores(
             realism=float(data.get("realism", 0)),

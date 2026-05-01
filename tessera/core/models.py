@@ -12,6 +12,7 @@ class TaskType(str, Enum):
     CLASSIFICATION = "classification"
     EXTRACTION = "extraction"
     INSTRUCTION = "instruction"
+    QA = "qa"
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +51,31 @@ class InstructionSpec(BaseModel):
     language: str = "English"
 
 
-TaskSpec = ClassificationSpec | ExtractionSpec | InstructionSpec
+_VALID_QUESTION_TYPES = {"factoid", "multi-hop", "abstractive", "unanswerable"}
+_VALID_DIFFICULTIES = {"easy", "medium", "hard"}
+
+
+class QASpec(BaseModel):
+    domain: str
+    question_types: list[str] = Field(
+        default_factory=lambda: ["factoid", "multi-hop", "abstractive", "unanswerable"]
+    )
+    language: str = "English"
+
+    @field_validator("question_types")
+    @classmethod
+    def valid_question_types(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("question_types must have at least one entry")
+        invalid = [qt for qt in v if qt not in _VALID_QUESTION_TYPES]
+        if invalid:
+            raise ValueError(
+                f"Invalid question_types: {invalid}. Must be from {sorted(_VALID_QUESTION_TYPES)}"
+            )
+        return v
+
+
+TaskSpec = ClassificationSpec | ExtractionSpec | InstructionSpec | QASpec
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +168,13 @@ class Example(BaseModel):
     instruction: Optional[str] = None
     response: Optional[str] = None
 
+    # QA
+    context: Optional[str] = None
+    question: Optional[str] = None
+    answer: Optional[str] = None
+    question_type: Optional[str] = None
+    difficulty: Optional[str] = None
+
     # Metadata
     taxonomy_node_id: Optional[str] = None
     persona_id: Optional[str] = None
@@ -168,6 +200,19 @@ class Example(BaseModel):
                 raise ValueError("instruction is required for INSTRUCTION examples")
             if self.response is None:
                 raise ValueError("response is required for INSTRUCTION examples")
+        elif self.task_type == TaskType.QA:
+            if self.context is None:
+                raise ValueError("context is required for QA examples")
+            if self.question is None:
+                raise ValueError("question is required for QA examples")
+            if self.answer is None:
+                raise ValueError("answer is required for QA examples")
+            if self.question_type is not None and self.question_type not in _VALID_QUESTION_TYPES:
+                raise ValueError(
+                    f"question_type must be one of {sorted(_VALID_QUESTION_TYPES)}"
+                )
+            if self.difficulty is not None and self.difficulty not in _VALID_DIFFICULTIES:
+                raise ValueError(f"difficulty must be one of {sorted(_VALID_DIFFICULTIES)}")
         return self
 
 
@@ -180,6 +225,31 @@ class GenerationResult(BaseModel):
     task_type: TaskType
     spec: dict[str, Any]
     examples: list[Example]
+    total_generated: int
+    total_after_critique: int
+    total_after_dedup: int
+    cost_usd: float = 0.0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class QAExample(BaseModel):
+    """User-facing QA example. Convert from pipeline Examples via QATask.format_for_finetuning()."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    context: str
+    question: str
+    answer: str
+    question_type: str
+    difficulty: str = "medium"
+    label: str  # mirrors question_type for pipeline label-balance compatibility
+
+
+class QAGenerationResult(BaseModel):
+    """Pipeline output for QA tasks with typed QAExample list."""
+
+    task_type: TaskType = TaskType.QA
+    spec: dict[str, Any]
+    examples: list[QAExample]
     total_generated: int
     total_after_critique: int
     total_after_dedup: int

@@ -24,6 +24,11 @@ class DedupEngine:
             return ex.text or ""
         elif ex.task_type == TaskType.EXTRACTION:
             return ex.source_text or ""
+        elif ex.task_type == TaskType.QA:
+            # Embed only the question — context is always unique per example so
+            # including it dilutes similarity and misses near-duplicate questions
+            # that differ only in fictional product/company names.
+            return ex.question or ""
         else:  # INSTRUCTION
             return (ex.instruction or "") + " " + (ex.response or "")
 

@@ -24,7 +24,7 @@ class ClassificationTask(TaskTemplate):
         self,
         model: str = "gpt-4o-mini",
         critique_model: str = "gpt-4o-mini",
-        dedup_threshold: float = 0.90,
+        dedup_threshold: float = 0.85,
         critique_threshold: float = 7.0,
     ) -> None:
         self.model = model

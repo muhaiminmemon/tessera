@@ -84,6 +84,9 @@ def generate(
             domain=domain,
             schema_definition={"field_1": "description", "field_2": "description"},
         )
+    elif task_type == TaskType.QA:
+        from tessera.core.models import QASpec
+        spec = QASpec(domain=domain)
     else:  # INSTRUCTION
         spec = InstructionSpec(
             domain=domain,
@@ -248,6 +251,64 @@ def benchmark(
     table.add_row("Random baseline", f"{results['random_f1']:.4f}")
     table.add_row("Tessera % of real data", f"{results['pct_of_real']:.1f}%")
     console.print(table)
+
+
+@app.command()
+def qa(
+    domain: str = typer.Option(..., help="Domain for QA generation"),
+    n_examples: int = typer.Option(500, help="Number of QA pairs to generate"),
+    output_path: str = typer.Option("qa_dataset.jsonl", help="Output file path"),
+    model: Optional[str] = typer.Option(
+        None, help="LLM model (default: TESSERA_DEFAULT_MODEL env var or gpt-4o-mini)"
+    ),
+    fmt: str = typer.Option("jsonl", help="Output format: jsonl | squad | alpaca"),
+    question_types: Optional[str] = typer.Option(
+        None,
+        help="Comma-separated question types (default: factoid,multi-hop,abstractive,unanswerable)",
+    ),
+) -> None:
+    """Generate a synthetic QA dataset for RAG evaluation or SQuAD-style fine-tuning."""
+    from tessera import generate as tessera_generate
+
+    model = model or os.environ.get("TESSERA_DEFAULT_MODEL", "gpt-4o-mini")
+    spec_dict: dict = {"domain": domain}
+    if question_types:
+        spec_dict["question_types"] = [q.strip() for q in question_types.split(",") if q.strip()]
+
+    console.print(
+        f"[bold green]Tessera QA[/bold green] — generating [cyan]{n_examples}[/cyan] QA pairs"
+    )
+    console.print(f"  Domain: {domain}")
+    console.print(f"  Model:  {model}")
+    if question_types:
+        console.print(f"  Types:  {question_types}")
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        progress.add_task("Running pipeline...", total=None)
+        result = tessera_generate(
+            task="qa",
+            spec_dict=spec_dict,
+            n_examples=n_examples,
+            model=model,
+            output_format=fmt,
+            output_path=output_path,
+        )
+
+    console.print("\n[bold]Pipeline summary[/bold]")
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("Stage")
+    table.add_column("Count", justify="right")
+    table.add_row("Generated", str(result.total_generated))
+    table.add_row("After critique", str(result.total_after_critique))
+    table.add_row("After dedup", str(result.total_after_dedup))
+    table.add_row("Final output", str(len(result.examples)))
+    table.add_row("Est. cost (USD)", f"${result.cost_usd:.4f}")
+    console.print(table)
+    console.print(f"\n[green]Saved to[/green] {output_path}")
 
 
 if __name__ == "__main__":

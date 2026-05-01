@@ -11,6 +11,7 @@ if TYPE_CHECKING:
         ExtractionSpec,
         InstructionSpec,
         Persona,
+        QASpec,
         TaxonomyNode,
     )
 
@@ -335,5 +336,174 @@ Return JSON:
   "realism": <0-10>,
   "label_correctness": <0-10>,
   "specificity": <0-10>,
+  "reasoning": "<1-2 sentence justification>"
+}}"""
+
+
+# ---------------------------------------------------------------------------
+# QA prompts
+# ---------------------------------------------------------------------------
+
+
+def qa_taxonomy_system(spec: "QASpec") -> str:
+    return (
+        "You are a taxonomy designer for a question-answering dataset. "
+        "Generate diverse source-text scenarios pairing domain subtopics with question types. "
+        "Return ONLY valid JSON with no markdown fences."
+    )
+
+
+def qa_taxonomy_user(spec: "QASpec") -> str:
+    return f"""Domain: {spec.domain}
+Question types: {json.dumps(spec.question_types)}
+Language: {spec.language}
+
+Generate at least 3 nodes per question type. Each node pairs a specific domain
+subtopic with a question type, describing a document passage scenario that
+naturally supports generating that question type.
+
+Return JSON:
+{{
+  "nodes": [
+    {{
+      "label": "<subtopic + question type description>",
+      "category": "<broad domain category>",
+      "subcategory": "<specific subtopic>",
+      "scenario": "<concrete document scenario in 1-2 sentences>",
+      "depth": 1,
+      "target_label": "<one of {spec.question_types}>"
+    }}
+  ]
+}}
+
+Ensure every question type in {json.dumps(spec.question_types)} has at least 3 nodes."""
+
+
+def qa_context_generation_system(
+    node: "TaxonomyNode", persona: "Persona", spec: "QASpec"
+) -> str:
+    return (
+        "You are a synthetic document writer. Write realistic, factually plausible "
+        "passages that resemble authentic documents from the given domain. "
+        f"{persona.to_prompt_fragment()} "
+        "Return ONLY valid JSON with no markdown fences."
+    )
+
+
+def qa_context_generation_user(
+    node: "TaxonomyNode", persona: "Persona", spec: "QASpec"
+) -> str:
+    return f"""Write a realistic document passage for the following scenario.
+
+Domain: {spec.domain}
+Scenario: {node.scenario}
+Category: {node.category} / {node.subcategory}
+Question type this passage will support: {node.target_label}
+Language: {spec.language}
+
+Requirements:
+- Write 150-300 words as a cohesive passage
+- Include specific details: names, dates, numbers, or technical terms where appropriate
+- Vary the structure: some passages use prose paragraphs, some include figures or structured data
+- The passage must contain enough specific, attributable information to support
+  a {node.target_label} question
+
+Return JSON:
+{{"context": "<the passage text>"}}"""
+
+
+def qa_pair_generation_system(spec: "QASpec") -> str:
+    return (
+        "You are a QA dataset generator. Create high-quality question-answer pairs "
+        "strictly grounded in a provided context passage. "
+        "Return ONLY valid JSON with no markdown fences."
+    )
+
+
+_QA_TYPE_INSTRUCTIONS: dict[str, str] = {
+    "factoid": (
+        "Ask about a single specific fact (name, date, number, or term) that is "
+        "directly and explicitly stated in the passage. "
+        "The answer must be a short phrase extracted verbatim or near-verbatim."
+    ),
+    "multi-hop": (
+        "Ask a question that requires combining TWO separate pieces of information "
+        "from different parts of the passage to arrive at the answer. "
+        "The answer should synthesize both pieces into one coherent response."
+    ),
+    "abstractive": (
+        "Ask a question whose answer requires paraphrasing, summarizing, or inferring "
+        "from the passage — not direct extraction. "
+        "The answer should demonstrate comprehension, not copy-paste."
+    ),
+    "unanswerable": (
+        "Ask a question that looks relevant and plausible for this domain but "
+        "CANNOT be answered from the passage alone — the information is simply absent. "
+        'The answer MUST be exactly: "This cannot be determined from the provided context."'
+    ),
+}
+
+
+def qa_pair_generation_user(context: str, question_type: str) -> str:
+    instruction = _QA_TYPE_INSTRUCTIONS.get(
+        question_type, _QA_TYPE_INSTRUCTIONS["factoid"]
+    )
+    return f"""Given the passage below, generate one {question_type} question-answer pair.
+
+Context:
+{context}
+
+Question type: {question_type}
+Instruction: {instruction}
+
+Assess difficulty:
+- easy: answer is obvious and directly stated
+- medium: requires careful reading comprehension
+- hard: requires careful reasoning or combining multiple details
+
+Return JSON:
+{{
+  "question": "<the question>",
+  "answer": "<the grounded answer>",
+  "question_type": "{question_type}",
+  "difficulty": "<easy | medium | hard>"
+}}"""
+
+
+def qa_critique_system(example: "Example", spec: "QASpec") -> str:
+    return (
+        "You are a quality evaluator for question-answering datasets. "
+        "Score (context, question, answer) triples on four axes, each 0-10. Be strict. "
+        "Return ONLY valid JSON with no markdown fences."
+    )
+
+
+def qa_critique_user(example: "Example", spec: "QASpec") -> str:
+    return f"""Evaluate this QA example:
+
+Domain: {spec.domain}
+Context: {example.context}
+
+Question: {example.question}
+Answer: {example.answer}
+Question type: {example.question_type}
+
+Score each axis 0-10:
+- groundedness: Is the answer actually supported by or derivable from the context?
+  For "unanswerable" questions, the answer must be exactly
+  "This cannot be determined from the provided context." — score 0 otherwise.
+  Set to 0 if the answer contradicts or ignores the context.
+- question_clarity: Is the question unambiguous, well-formed, and answerable in principle?
+- answer_completeness: Does the answer fully address the question?
+  Factoid: is it precise? Multi-hop: does it combine both pieces?
+  Abstractive: does it paraphrase correctly? Unanswerable: is the prescribed answer used?
+- overall: Overall quality as a training example (correctness, usefulness, naturalness).
+
+Return JSON:
+{{
+  "groundedness": <0-10>,
+  "question_clarity": <0-10>,
+  "answer_completeness": <0-10>,
+  "overall": <0-10>,
   "reasoning": "<1-2 sentence justification>"
 }}"""

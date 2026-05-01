@@ -65,18 +65,26 @@ class TaskTemplate(ABC):
         spec: TaskSpec,
         personas: list[Persona],
         n_examples: int,
-        critique_threshold: float = 6.0,
+        critique_threshold: float | None = None,
         max_attempts_multiplier: float = 2.5,
+        target_per_label: int | None = None,
     ) -> GenerationResult:
         """End-to-end pipeline: taxonomy → generate → critique → dedup → trim."""
         taxonomy = self.build_taxonomy(spec)
 
-        target_raw = int(n_examples * max_attempts_multiplier)
+        labels_in_taxonomy = sorted({n.target_label for n in taxonomy.nodes})
+        num_labels = len(labels_in_taxonomy)
+        effective_n = (
+            target_per_label * num_labels
+            if target_per_label is not None and num_labels > 0
+            else n_examples
+        )
+
+        target_raw = int(effective_n * max_attempts_multiplier)
         nodes_sample = self._sample_nodes_balanced(taxonomy, target_raw)
 
-        # Propagate the caller-supplied threshold into the task so critique_example
-        # uses it instead of the task's constructor default.
-        if hasattr(self, "critique_threshold"):
+        # Only override the task's critique_threshold when the caller explicitly sets one.
+        if critique_threshold is not None and hasattr(self, "critique_threshold"):
             self.critique_threshold = critique_threshold
 
         cost_before = get_client().usage.cost_usd
@@ -121,20 +129,28 @@ class TaskTemplate(ABC):
                     scored.append(result)
 
         passed = [ex for ex in scored if ex.passed_critique]
-        total_after_critique = len(passed)
 
-        if scored and total_after_critique == len(scored):
+        if scored and len(passed) == len(scored):
             print(
                 "[tessera] warning: 100% critique pass rate — "
                 "consider raising threshold to 7.0"
             )
+
+        # Fill-up pass: targeted generation for underrepresented labels
+        if target_per_label is not None and num_labels > 0:
+            passed = self._fill_up_labels(
+                passed, taxonomy, labels_in_taxonomy, target_per_label,
+                max_attempts_multiplier, personas, spec, _gen_worker, _critique_worker,
+            )
+
+        total_after_critique = len(passed)
 
         # Dedup
         deduped = self.deduplicate(passed)
         total_after_dedup = len(deduped)
 
         # Trim to requested size with strict label balance
-        final = self._trim_to_balance(deduped, n_examples)
+        final = self._trim_to_balance(deduped, effective_n)
 
         cost_usd = get_client().usage.cost_usd - cost_before
 
@@ -151,6 +167,54 @@ class TaskTemplate(ABC):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _fill_up_labels(
+        self,
+        passed: list[Example],
+        taxonomy: Any,
+        labels_in_taxonomy: list[str],
+        target_per_label: int,
+        max_attempts_multiplier: float,
+        personas: list[Persona],
+        spec: TaskSpec,
+        gen_worker: Any,
+        critique_worker: Any,
+    ) -> list[Example]:
+        """One extra generate+critique pass targeting labels below their quota."""
+        from collections import Counter
+
+        label_counts: Counter = Counter(ex.label for ex in passed if ex.label is not None)
+        extra_nodes: list[Any] = []
+        for lbl in labels_in_taxonomy:
+            deficit = target_per_label - label_counts.get(lbl, 0)
+            if deficit > 0:
+                lbl_nodes = taxonomy.nodes_for_label(lbl)
+                if lbl_nodes:
+                    extra_nodes.extend(
+                        random.choices(lbl_nodes, k=int(deficit * max_attempts_multiplier))
+                    )
+
+        if not extra_nodes:
+            return passed
+
+        max_workers = int(os.environ.get("TESSERA_MAX_CONCURRENT", "10"))
+        print(f"[tessera] fill-up: {len(extra_nodes)} extra nodes for underrepresented labels")
+
+        extra_raw: list[Example] = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for future in as_completed([executor.submit(gen_worker, nd) for nd in extra_nodes]):
+                r = future.result()
+                if r is not None:
+                    extra_raw.append(r)
+
+        extra_passed: list[Example] = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for future in as_completed([executor.submit(critique_worker, ex) for ex in extra_raw]):
+                r = future.result()
+                if r is not None and r.passed_critique:
+                    extra_passed.append(r)
+
+        return passed + extra_passed
 
     def _task_type(self) -> TaskType:
         raise NotImplementedError("subclass must override _task_type()")
