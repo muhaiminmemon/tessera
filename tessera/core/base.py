@@ -76,12 +76,22 @@ class TaskTemplate(ABC):
         critique_threshold: float | None = None,
         max_attempts_multiplier: float = 2.5,
         target_per_label: int | None = None,
+        max_retries: int = 3,
     ) -> GenerationResult:
-        """End-to-end pipeline: taxonomy → generate → critique → dedup → trim."""
+        """End-to-end pipeline: taxonomy → generate → critique → dedup → trim.
+
+        Guarantees the requested ``n_examples`` through a retry loop: after each
+        generate→critique→dedup cycle, if the surviving pool is smaller than the
+        target the pipeline generates exactly the deficit (× multiplier) more
+        examples and merges them into the pool.  Retries up to ``max_retries``
+        times before logging a warning and returning whatever was collected.
+        """
         if n_examples <= 0:
             raise ConfigurationError(f"n_examples must be > 0, got {n_examples}")
         if not personas:
             raise ConfigurationError("personas list must not be empty")
+        if max_retries < 0:
+            raise ConfigurationError(f"max_retries must be >= 0, got {max_retries}")
 
         taxonomy = self.build_taxonomy(spec)
         labels_in_taxonomy = sorted({n.target_label for n in taxonomy.nodes})
@@ -93,15 +103,15 @@ class TaskTemplate(ABC):
             else n_examples
         )
 
-        target_raw = int(effective_n * max_attempts_multiplier)
-        nodes_sample = self._sample_nodes_balanced(taxonomy, target_raw)
-
         if critique_threshold is not None and hasattr(self, "critique_threshold"):
             self.critique_threshold = critique_threshold
 
         max_workers = _cfg.max_concurrent()
         cost_before = get_client().usage.cost_usd
 
+        # --- Initial generation pass (2.5× oversampling) ---
+        target_raw = int(effective_n * max_attempts_multiplier)
+        nodes_sample = self._sample_nodes_balanced(taxonomy, target_raw)
         raw_examples = self._run_generation_phase(nodes_sample, personas, spec, max_workers)
         total_generated = len(raw_examples)
 
@@ -114,7 +124,36 @@ class TaskTemplate(ABC):
             )
 
         total_after_critique = len(passed)
+
+        # --- Retry loop: keep topping up until we have enough ---
         deduped = self.deduplicate(passed)
+        attempt = 0
+        while len(deduped) < effective_n and attempt < max_retries:
+            deficit = effective_n - len(deduped)
+            attempt += 1
+            log.info(
+                "top-up retry %d/%d — need %d more examples after dedup",
+                attempt, max_retries, deficit,
+            )
+            top_up_nodes = self._sample_nodes_balanced(
+                taxonomy, int(deficit * max_attempts_multiplier)
+            )
+            top_up_raw = self._run_generation_phase(
+                top_up_nodes, personas, spec, max_workers
+            )
+            top_up_passed = self._run_critique_phase(top_up_raw, spec, max_workers)
+            total_generated += len(top_up_raw)
+            total_after_critique += len(top_up_passed)
+            # Re-dedup the combined pool so new examples don't duplicate existing ones
+            deduped = self.deduplicate(deduped + top_up_passed)
+
+        if len(deduped) < effective_n:
+            log.warning(
+                "could only collect %d/%d examples after %d retries — "
+                "try lowering critique_threshold or dedup_threshold",
+                len(deduped), effective_n, max_retries,
+            )
+
         total_after_dedup = len(deduped)
         final = self._trim_to_balance(deduped, effective_n)
         cost_usd = get_client().usage.cost_usd - cost_before

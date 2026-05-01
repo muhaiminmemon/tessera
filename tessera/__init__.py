@@ -8,10 +8,13 @@ Quick start:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from pathlib import Path
 from typing import Any, Optional
+
+log = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 
@@ -60,6 +63,7 @@ def generate(
     critique_threshold: Optional[float] = None,
     output_format: str = "jsonl",
     output_path: Optional[str] = None,
+    max_retries: int = 3,
 ) -> GenerationResult:
     """
     Generate a synthetic dataset end-to-end.
@@ -67,21 +71,26 @@ def generate(
     Parameters
     ----------
     task:
-        One of "classification", "extraction", "instruction".
+        One of "classification", "extraction", "instruction", "qa".
     spec_dict:
         Dictionary matching the spec for the chosen task type.
     n_examples:
-        Target number of examples in the final dataset.
+        Target number of examples in the final dataset.  The pipeline retries
+        up to ``max_retries`` times to guarantee this count is reached.
     model:
         LLM model name. Defaults to TESSERA_DEFAULT_MODEL env var or gpt-4o-mini.
     critique_threshold:
         Minimum mean critique score (0-10) for an example to pass.
         Defaults to None, which uses each task's built-in default
-        (classification: 7.0, extraction: 7.5, instruction: 7.0).
+        (classification: 7.0, extraction: 7.5, instruction: 7.0, qa: 7.5).
     output_format:
         "jsonl", "alpaca", or "sharegpt".
     output_path:
         If set, writes the formatted dataset to this file.
+    max_retries:
+        How many additional generate→critique→dedup passes to run if the
+        pool falls short of n_examples after the initial pass. Default 3.
+        Set to 0 to disable retries (returns whatever the first pass yields).
 
     Returns
     -------
@@ -119,11 +128,12 @@ def generate(
         personas=personas,
         n_examples=n_examples,
         critique_threshold=critique_threshold,
+        max_retries=max_retries,
     )
     elapsed = time.time() - t0
-    print(
-        f"[tessera] done: {len(result.examples)} examples | "
-        f"cost ${result.cost_usd:.4f} | {elapsed:.1f}s"
+    log.info(
+        "done: %d examples | cost $%.4f | %.1fs",
+        len(result.examples), result.cost_usd, elapsed,
     )
 
     if output_path:

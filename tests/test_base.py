@@ -123,3 +123,17 @@ class TestRunPipelineValidation:
                 personas=[],
                 n_examples=10,
             )
+
+    def test_rejects_negative_max_retries(
+        self, classification_spec, sample_persona
+    ) -> None:
+        from tessera.tasks.classification import ClassificationTask
+
+        task = ClassificationTask()
+        with pytest.raises(ConfigurationError, match="max_retries"):
+            task.run_pipeline(
+                spec=classification_spec,
+                personas=[sample_persona],
+                n_examples=10,
+                max_retries=-1,
+            )
