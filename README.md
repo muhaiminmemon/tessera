@@ -410,6 +410,22 @@ Your spec (domain, labels / schema / question_types)
   JSONL / Alpaca / ShareGPT / SQuAD
 ```
 
+**Stage 3 — Critique scoring**
+
+Each example is scored on three axes and kept only if the mean exceeds the threshold $\tau$:
+
+$$\bar{s} = \frac{1}{3}\left(s_{\text{realism}} + s_{\text{correctness}} + s_{\text{specificity}}\right), \qquad \text{discard if } \bar{s} < \tau$$
+
+where $\tau = 7.0$ for classification and instruction tasks, and $\tau = 7.5$ for extraction and QA.
+
+**Stage 4 — Embedding deduplication**
+
+Embeddings are compared with cosine similarity. A candidate example $x_i$ is discarded if it is too close to any already-accepted example $x_j$:
+
+$$\text{sim}(a,\, b) = \frac{a \cdot b}{\|a\|\,\|b\|}, \qquad \text{discard } x_i \text{ if } \exists\, x_j : \text{sim}(x_i, x_j) \geq \delta$$
+
+where $\delta = 0.85$ by default (configurable via `dedup_threshold`).
+
 ---
 
 ## Task types
