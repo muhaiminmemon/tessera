@@ -15,7 +15,7 @@ def max_concurrent() -> int:
     Override by setting the ``TESSERA_MAX_CONCURRENT`` environment variable.
     Defaults to 10.
     """
-    return int(os.environ.get("TESSERA_MAX_CONCURRENT", "10"))
+    return int(os.environ.get("TESSERA_MAX_CONCURRENT", "5"))
 
 
 # Generation temperatures — kept as named constants so pipeline code never

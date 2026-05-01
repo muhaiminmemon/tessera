@@ -71,7 +71,11 @@ class LLMClient:
             with self._init_lock:
                 if self._openai is None:
                     from openai import OpenAI
-                    self._openai = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+                    self._openai = OpenAI(
+                        api_key=os.environ.get("OPENAI_API_KEY"),
+                        timeout=60.0,
+                        max_retries=0,  # tenacity owns all retry logic
+                    )
         return self._openai
 
     def _get_anthropic(self) -> object:
@@ -90,6 +94,7 @@ class LLMClient:
                     self._together = OpenAI(
                         api_key=os.environ.get("TOGETHER_API_KEY", ""),
                         base_url="https://api.together.xyz/v1",
+                        max_retries=0,
                     )
         return self._together
 
@@ -101,6 +106,7 @@ class LLMClient:
                     self._groq = OpenAI(
                         api_key=os.environ.get("GROQ_API_KEY", ""),
                         base_url="https://api.groq.com/openai/v1",
+                        max_retries=0,
                     )
         return self._groq
 
@@ -114,8 +120,8 @@ class LLMClient:
         return "openai"
 
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=30),
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=2, min=10, max=90),
         reraise=True,
     )
     def complete(

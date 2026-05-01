@@ -93,6 +93,22 @@ class GenerationEngine:
 
         return examples
 
+    def generate_one(
+        self,
+        node: TaxonomyNode,
+        persona: Persona,
+        spec: TaskSpec,
+        task_type: TaskType,
+        model: str = "gpt-4o-mini",
+    ) -> Example:
+        """Generate a single example synchronously, without spawning a thread pool.
+
+        Use this from within an already-parallelised context (e.g. TaskTemplate
+        worker threads) to avoid creating a nested ThreadPoolExecutor.
+        """
+        client = get_client()
+        return self._generate_one(client, node, persona, spec, task_type, model)
+
     def _generate_one(
         self,
         client: object,

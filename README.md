@@ -35,15 +35,17 @@ Tessera generates that data automatically. You describe what you need in plain t
 
 ### Banking77 Intent Classification
 
-Fine-tuned `Llama-3.2-3B` on 1,246 Tessera-generated examples vs. real human-labeled Banking77 data.
+Fine-tuned `Llama-3.2-3B` on 1,246 Tessera-generated examples vs. the real human-labeled Banking77 dataset (expert-annotated by PolyAI).
 
 | Condition | Macro F1 | Accuracy | Cost |
 |-----------|----------|----------|------|
 | Random baseline | 0.1665 | — | $0 |
-| Real labeled data | 0.8102 | 96.5% | ~$300+ (human annotation) |
+| Real labeled data (Banking77) | 0.8102 | 96.5% | Human annotated |
 | **Tessera synthetic** | **0.7869** | **93.5%** | **$0.40** |
 
-**97.1% of real-data F1 at 750× lower cost.**
+**97.1% of real-data F1 for $0.40.**
+
+For context: industry-standard crowd-sourcing for text intent classification runs $0.05–$0.25 per label ([GigaBPO 2026 benchmarks](https://gigabpo.com/how-much-does-data-labeling-cost/)). At those rates, 1,246 labeled examples costs **$62–$311** — meaning Tessera is **155×–780× cheaper** than equivalent crowd-sourced annotation, before accounting for the time cost of managing annotators.
 
 ---
 
@@ -110,7 +112,7 @@ Extraction is the hardest task type — the model simultaneously learns entity i
 
 | Task | Metric | Result | Cost |
 |------|--------|--------|------|
-| Banking77 classification | Macro F1 | **97.1% of real-data** | $0.40 |
+| Banking77 classification | Macro F1 | **97.1% of real-data** | $0.40 (vs. $62–$311 crowd-sourcing) |
 | SQuAD QA | Token F1 | **72.5% of real-data** | $0.19 |
 | Enterprise RAG eval | Hallucination refusal | **98% accuracy** | $0.19 |
 | Python instruction | ROUGE-L | **+26.85% over zero-shot** | ~$0.30 |

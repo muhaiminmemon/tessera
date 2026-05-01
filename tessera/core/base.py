@@ -93,9 +93,11 @@ class TaskTemplate(ABC):
         if max_retries < 0:
             raise ConfigurationError(f"max_retries must be >= 0, got {max_retries}")
 
+        log.info("building taxonomy...")
         taxonomy = self.build_taxonomy(spec)
         labels_in_taxonomy = sorted({n.target_label for n in taxonomy.nodes})
         num_labels = len(labels_in_taxonomy)
+        log.info("taxonomy ready: %d nodes across %d labels", len(taxonomy.nodes), num_labels)
 
         effective_n = (
             target_per_label * num_labels
@@ -111,10 +113,16 @@ class TaskTemplate(ABC):
 
         # --- Initial generation pass (2.5× oversampling) ---
         target_raw = int(effective_n * max_attempts_multiplier)
+        log.info(
+            "starting generation: target=%d, oversampled=%d, workers=%d",
+            effective_n, target_raw, max_workers,
+        )
         nodes_sample = self._sample_nodes_balanced(taxonomy, target_raw)
         raw_examples = self._run_generation_phase(nodes_sample, personas, spec, max_workers)
         total_generated = len(raw_examples)
+        log.info("generation done: %d/%d examples produced", total_generated, target_raw)
 
+        log.info("starting critique: %d examples to score...", total_generated)
         passed = self._run_critique_phase(raw_examples, spec, max_workers)
 
         if target_per_label is not None and num_labels > 0:
@@ -124,9 +132,16 @@ class TaskTemplate(ABC):
             )
 
         total_after_critique = len(passed)
+        log.info(
+            "critique done: %d/%d passed (%.0f%% pass rate)",
+            total_after_critique, total_generated,
+            100 * total_after_critique / total_generated if total_generated else 0,
+        )
 
         # --- Retry loop: keep topping up until we have enough ---
+        log.info("deduplicating %d examples...", total_after_critique)
         deduped = self.deduplicate(passed)
+        log.info("dedup done: %d examples remaining (target: %d)", len(deduped), effective_n)
         attempt = 0
         while len(deduped) < effective_n and attempt < max_retries:
             deficit = effective_n - len(deduped)
@@ -190,15 +205,22 @@ class TaskTemplate(ABC):
 
         raw: list[Example] = []
         total = len(nodes_sample)
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [executor.submit(_gen_worker, node) for node in nodes_sample]
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        futures = [executor.submit(_gen_worker, node) for node in nodes_sample]
+        try:
             for i, future in enumerate(as_completed(futures), 1):
                 result = future.result()
                 if result is not None:
                     raw.append(result)
-                if i % 10 == 0:
+                if i % 5 == 0 or i == total:
                     log.info("generating %d/%d...", i, total)
-
+        except (KeyboardInterrupt, SystemExit):
+            for f in futures:
+                f.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
+        else:
+            executor.shutdown(wait=True)
         return raw
 
     def _run_critique_phase(
@@ -216,12 +238,23 @@ class TaskTemplate(ABC):
                 return None
 
         scored: list[Example] = []
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(_critique_worker, ex): ex for ex in raw_examples}
-            for future in as_completed(futures):
+        total_c = len(raw_examples)
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        futures = {executor.submit(_critique_worker, ex): ex for ex in raw_examples}
+        try:
+            for i, future in enumerate(as_completed(futures), 1):
                 result = future.result()
                 if result is not None:
                     scored.append(result)
+                if i % 50 == 0 or i == total_c:
+                    log.info("critiquing %d/%d...", i, total_c)
+        except (KeyboardInterrupt, SystemExit):
+            for f in futures:
+                f.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
+        else:
+            executor.shutdown(wait=True)
 
         passed = [ex for ex in scored if ex.passed_critique]
 

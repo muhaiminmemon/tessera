@@ -59,17 +59,13 @@ class QATask(TaskTemplate):
             raise ConfigurationError(
                 f"QATask requires QASpec, got {type(spec).__name__}"
             )
-        results = self._generator.generate_batch(
-            nodes=[node],
-            personas=[persona],
+        return self._generator.generate_one(
+            node=node,
+            persona=persona,
             spec=spec,
             task_type=TaskType.QA,
             model=self.model,
-            n=1,
         )
-        if not results:
-            raise RuntimeError("GenerationEngine returned no examples")
-        return results[0]
 
     def critique_example(self, example: Example, spec: TaskSpec) -> Example:
         if not isinstance(spec, QASpec):

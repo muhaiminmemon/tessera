@@ -7,12 +7,19 @@ Writes output to outputs/banking77_smoke_test.jsonl.
 """
 from __future__ import annotations
 
+import logging
 import random
 from collections import Counter
 from pathlib import Path
 
 from tessera import generate
 from tessera.core.models import TaskType
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 LABELS = [
     "lost_or_stolen_card",
@@ -53,7 +60,7 @@ def main() -> None:
     result = generate(
         task="classification",
         spec_dict=SPEC,
-        n_examples=1000,
+        n_examples=50,
         output_format="jsonl",
         output_path="outputs/banking77_smoke_test.jsonl",
     )
