@@ -42,7 +42,7 @@ class TestParseJson:
         assert _parse_json(raw) == {"key": "value"}
 
     def test_raises_on_invalid_json(self) -> None:
-        with pytest.raises(json.JSONDecodeError):
+        with pytest.raises(GenerationError, match="LLM returned invalid JSON"):
             _parse_json("not json")
 
 

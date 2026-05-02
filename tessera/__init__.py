@@ -38,12 +38,24 @@ from tessera.core.models import (
     TaskType,
 )
 from tessera.core.personas import get_all_personas
+from tessera.tasks.classification import ClassificationTask
+from tessera.tasks.extraction import ExtractionTask
+from tessera.tasks.instruction import InstructionTask
 from tessera.tasks.qa import QATask
 
 __version__ = "0.1.0"
 __all__ = [
     "generate",
+    # Task classes
+    "ClassificationTask",
+    "ExtractionTask",
+    "InstructionTask",
     "QATask",
+    # Spec types
+    "ClassificationSpec",
+    "ExtractionSpec",
+    "InstructionSpec",
+    "QASpec",
     "__version__",
     # Exceptions
     "TesseraError",
@@ -96,9 +108,10 @@ def generate(
     -------
     GenerationResult
     """
-    from tessera.tasks.classification import ClassificationTask
-    from tessera.tasks.extraction import ExtractionTask
-    from tessera.tasks.instruction import InstructionTask
+    if not os.environ.get("OPENAI_API_KEY"):
+        raise ConfigurationError(
+            "OPENAI_API_KEY is not set — add it to your .env file or export it as an environment variable."
+        )
 
     model = model or os.environ.get("TESSERA_DEFAULT_MODEL", "gpt-4o-mini")
     task_type = TaskType(task.lower())

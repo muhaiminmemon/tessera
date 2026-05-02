@@ -13,7 +13,7 @@ def max_concurrent() -> int:
     """Maximum number of parallel LLM threads.
 
     Override by setting the ``TESSERA_MAX_CONCURRENT`` environment variable.
-    Defaults to 10.
+    Defaults to 5.
     """
     return int(os.environ.get("TESSERA_MAX_CONCURRENT", "5"))
 

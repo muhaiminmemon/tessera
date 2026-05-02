@@ -5,9 +5,12 @@ Run on Colab with GPU runtime (free T4 is sufficient for 3B models).
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 from tessera.core.models import Example, TaskType
 
@@ -144,5 +147,5 @@ class UnslothFinetuner:
         tokenizer.save_pretrained(str(output_path / "lora_adapter"))
 
         saved_path = str(output_path / "lora_adapter")
-        print(f"[UnslothFinetuner] Model saved to {saved_path}")
+        log.info("Model saved to %s", saved_path)
         return saved_path

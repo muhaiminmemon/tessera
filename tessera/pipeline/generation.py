@@ -56,7 +56,12 @@ def _parse_json(raw: str) -> dict:
         lines = text.splitlines()
         inner = [ln for ln in lines[1:] if ln.strip() != "```"]
         text = "\n".join(inner).strip()
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise GenerationError(
+            f"LLM returned invalid JSON: {exc}. Raw response was: {raw!r}"
+        ) from exc
 
 
 class GenerationEngine:
