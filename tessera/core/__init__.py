@@ -1,3 +1,5 @@
+from tessera.core.base import TaskTemplate
+from tessera.core.llm_client import LLMClient, UsageStats, get_client
 from tessera.core.models import (
     ClassificationSpec,
     CritiqueScores,
@@ -13,8 +15,6 @@ from tessera.core.models import (
     ValidationMetrics,
 )
 from tessera.core.personas import PERSONAS, get_all_personas
-from tessera.core.llm_client import LLMClient, UsageStats, get_client
-from tessera.core.base import TaskTemplate
 
 __all__ = [
     "ClassificationSpec",

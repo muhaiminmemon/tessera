@@ -24,7 +24,7 @@ console = Console()
 
 def _load_jsonl(path: str) -> list[dict]:
     rows = []
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
@@ -34,14 +34,16 @@ def _load_jsonl(path: str) -> list[dict]:
 
 def _write_jsonl(rows: list[dict], path: str) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 @app.command()
 def generate(
-    task: str = typer.Option(..., help="Task type: classification | extraction | instruction"),
+    task: str = typer.Option(
+        ..., help="Task type: classification | extraction | instruction | qa"
+    ),
     domain: str = typer.Option(..., help="Domain description, e.g. 'banking customer support'"),
     labels: Optional[str] = typer.Option(
         None, help="Comma-separated labels (classification only)"
@@ -59,6 +61,7 @@ def generate(
         ClassificationSpec,
         ExtractionSpec,
         InstructionSpec,
+        QASpec,
         TaskType,
     )
 
@@ -70,11 +73,12 @@ def generate(
     console.print(f"  Domain: {domain}")
     console.print(f"  Model:  {model}")
 
+    spec: ClassificationSpec | ExtractionSpec | InstructionSpec | QASpec
     if task_type == TaskType.CLASSIFICATION:
         if not labels:
             console.print("[red]--labels is required for classification tasks[/red]")
             raise typer.Exit(1)
-        label_list = [l.strip() for l in labels.split(",") if l.strip()]
+        label_list = [lbl.strip() for lbl in labels.split(",") if lbl.strip()]
         spec = ClassificationSpec(domain=domain, labels=label_list)
     elif task_type == TaskType.EXTRACTION:
         console.print(
@@ -85,7 +89,6 @@ def generate(
             schema_definition={"field_1": "description", "field_2": "description"},
         )
     elif task_type == TaskType.QA:
-        from tessera.core.models import QASpec
         spec = QASpec(domain=domain)
     else:  # INSTRUCTION
         spec = InstructionSpec(
@@ -108,7 +111,7 @@ def generate(
             output_path=output,
         )
 
-    console.print(f"\n[bold]Pipeline summary[/bold]")
+    console.print("\n[bold]Pipeline summary[/bold]")
     table = Table(show_header=True, header_style="bold magenta")
     table.add_column("Stage")
     table.add_column("Count", justify="right")
@@ -133,8 +136,8 @@ def validate(
 ) -> None:
     """Fine-tune a model on training data and evaluate on test data."""
     from tessera.core.models import Example, TaskType
-    from tessera.validation.finetune import UnslothFinetuner
     from tessera.validation.evaluate import Evaluator
+    from tessera.validation.finetune import UnslothFinetuner
 
     task_type = TaskType(task.lower())
 

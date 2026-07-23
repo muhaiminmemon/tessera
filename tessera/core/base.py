@@ -5,7 +5,7 @@ import logging
 import random
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Callable
+from typing import Any
 
 from tessera.core import config as _cfg
 from tessera.core.exceptions import ConfigurationError
@@ -339,17 +339,19 @@ class TaskTemplate(ABC):
         if not examples:
             return []
 
-        if any(ex.label is None for ex in examples):
+        labels = [ex.label for ex in examples]
+        if any(lbl is None for lbl in labels):
             return examples[:n]
 
-        label_set = sorted({ex.label for ex in examples})  # type: ignore[arg-type]
+        label_set = sorted({lbl for lbl in labels if lbl is not None})
         num_labels = len(label_set)
         if num_labels == 0:
             return examples[:n]
 
         buckets: dict[str, list[Example]] = {lbl: [] for lbl in label_set}
-        for ex in examples:
-            buckets[ex.label].append(ex)  # type: ignore[index]
+        for ex, lbl in zip(examples, labels):
+            if lbl is not None:
+                buckets[lbl].append(ex)
 
         base_q = n // num_labels
         remainder = n % num_labels

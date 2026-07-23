@@ -39,9 +39,11 @@ class HardNegativeMiner:
         examples: list[Example],
         oversample_factor: float,
     ) -> list[Example]:
+        import uuid
+
+        import numpy as np
         from sentence_transformers import SentenceTransformer
         from sklearn.linear_model import LogisticRegression
-        import numpy as np
 
         texts = [ex.text or "" for ex in examples]
         labels = [ex.label or "" for ex in examples]
@@ -78,10 +80,7 @@ class HardNegativeMiner:
             for ex in hard_negatives:
                 if added >= max_to_add:
                     break
-                import copy
-                import uuid as _uuid
-
-                dup = ex.model_copy(update={"id": str(_uuid.uuid4())})
+                dup = ex.model_copy(update={"id": str(uuid.uuid4())})
                 result.append(dup)
                 added += 1
 

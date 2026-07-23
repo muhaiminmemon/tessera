@@ -64,7 +64,7 @@ class Evaluator:
                 temperature=0.1,
                 do_sample=False,
             )
-        decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        decoded: str = tokenizer.decode(outputs[0], skip_special_tokens=True)
         # Strip the prompt prefix
         return decoded[len(prompt):].strip()
 
@@ -75,7 +75,7 @@ class Evaluator:
         base_model: str,
         dataset_name: str,
     ) -> ValidationMetrics:
-        from sklearn.metrics import f1_score, accuracy_score
+        from sklearn.metrics import accuracy_score, f1_score
 
         model, tokenizer = self._load_model(model_path, base_model)
 
@@ -112,8 +112,6 @@ class Evaluator:
         base_model: str,
         dataset_name: str,
     ) -> ValidationMetrics:
-        from sklearn.metrics import f1_score
-
         model, tokenizer = self._load_model(model_path, base_model)
 
         per_field_matches: dict[str, list[int]] = {}

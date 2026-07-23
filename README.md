@@ -7,7 +7,7 @@
 [![CI](https://github.com/muhaiminmemon/tessera/actions/workflows/ci.yml/badge.svg)](https://github.com/muhaiminmemon/tessera/actions)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-98%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-112%20passing-brightgreen.svg)](tests/)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 
 <br/>
@@ -128,7 +128,7 @@ cd tessera
 pip install -e ".[dev]"
 ```
 
-> PyPI release coming soon. For now, install from source above.
+> PyPI release is planned. The `tessera` name on PyPI is held by an unrelated, unmaintained project, so the published distribution will use a different name — until then, install from source as above.
 
 Add your API keys — copy `.env.example` to `.env`:
 
@@ -143,7 +143,7 @@ TOGETHER_API_KEY=...            # optional
 GROQ_API_KEY=...                # optional
 ```
 
-Tessera routes to whichever provider you have keys for. Only `OPENAI_API_KEY` is required for all task types out of the box.
+Tessera routes each model name to its provider automatically — you only need the API key for the provider your chosen model belongs to. The default (`gpt-4o-mini`) requires `OPENAI_API_KEY`.
 
 ---
 
@@ -323,17 +323,18 @@ tessera qa \
   --model gpt-4o-mini \
   --output-path healthcare_qa.jsonl
 
-# Validate a generated dataset
+# Fine-tune on a generated dataset and evaluate against a test set (requires GPU + unsloth)
 tessera validate \
-  --input outputs/banking77_tessera_train.jsonl \
-  --task classification
+  --task classification \
+  --train outputs/banking77_tessera_train.jsonl \
+  --test outputs/banking77_test.jsonl
 ```
 
 ---
 
 ## How it works
 
-Tessera runs a 6-stage pipeline. Each stage is independently configurable and all generation is parallel (configurable via `TESSERA_MAX_CONCURRENT`).
+Tessera runs a 6-stage pipeline. Stages 1–4 run automatically on every `generate()` call; stages 5–6 are optional add-ons (hard-negative mining via `HardNegativeMiner`, downstream validation via the `tessera validate` / `benchmark` CLI). Each stage is independently configurable and all generation is parallel (configurable via `TESSERA_MAX_CONCURRENT`).
 
 ```
 Your spec (domain, labels / schema / question_types)
@@ -388,7 +389,8 @@ Your spec (domain, labels / schema / question_types)
                      ▼
 ┌─────────────────────────────────────────┐
 │  Stage 5 — Hard-Negative Mining         │
-│                                         │
+│            (optional post-processing,   │
+│             classification only)        │
 │  LogisticRegression on embeddings       │
 │  identifies near-boundary examples      │
 │  (confusable between labels) and        │
@@ -399,6 +401,7 @@ Your spec (domain, labels / schema / question_types)
                      ▼
 ┌─────────────────────────────────────────┐
 │  Stage 6 — Downstream Validation        │
+│            (optional)                   │
 │                                         │
 │  Optional: Unsloth LoRA fine-tune       │
 │  (Llama-3.2-3B, r=16, 3 epochs) →       │
@@ -425,6 +428,15 @@ Embeddings are compared with cosine similarity. A candidate example $x_i$ is dis
 $$\text{sim}(a,\, b) = \frac{a \cdot b}{\|a\|\,\|b\|}, \qquad \text{discard } x_i \text{ if } \exists\, x_j : \text{sim}(x_i, x_j) \geq \delta$$
 
 where $\delta = 0.85$ by default (configurable via `dedup_threshold`).
+
+**Stage 5 — Hard-negative mining** (optional, classification only)
+
+```python
+from tessera.pipeline.hard_negative import HardNegativeMiner
+
+miner = HardNegativeMiner()
+boosted = miner.mine(result.examples, spec, oversample_factor=2.0)
+```
 
 ---
 
@@ -590,7 +602,7 @@ tessera/
     └── benchmarks.py      # BenchmarkRunner with real-data comparison
 examples/                  # Runnable end-to-end scripts
 scripts/                   # Evaluation and analysis utilities
-tests/                     # 98 unit tests, all LLM calls mocked
+tests/                     # 112 unit tests, all LLM calls mocked
 ```
 
 ---
@@ -612,20 +624,32 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full step-by-step guide.
 
 ## Fine-tuning on Colab
 
-Open the Colab notebook for one-click Unsloth LoRA fine-tuning on any Tessera-generated dataset:
+Fine-tuning requires a CUDA GPU — a free Colab T4 is sufficient for 3B models:
 
 ```python
 # In Colab — install and run
-!pip install unsloth tessera
+!pip install unsloth "git+https://github.com/muhaiminmemon/tessera"
+
+import json
+from tessera.core.models import Example, TaskType
 from tessera.validation.finetune import UnslothFinetuner
 
-finetuner = UnslothFinetuner(
-    base_model="unsloth/Llama-3.2-3B-Instruct",
+with open("banking_train.jsonl") as f:
+    train = [Example(task_type=TaskType.CLASSIFICATION, **json.loads(line)) for line in f]
+
+finetuner = UnslothFinetuner()
+model_path = finetuner.run(
+    train_examples=train,
+    task_type=TaskType.CLASSIFICATION,
     output_dir="tessera_model",
-    num_epochs=3,
-    lora_r=16,
+    base_model="unsloth/Llama-3.2-3B-Instruct",  # LoRA r=16, 3 epochs by default
 )
-finetuner.run(train_path="banking_train.jsonl", task_type="classification")
+```
+
+Or use the CLI, which fine-tunes and evaluates in one step:
+
+```bash
+tessera validate --task classification --train banking_train.jsonl --test banking_test.jsonl
 ```
 
 ---
@@ -684,7 +708,7 @@ All LLM calls in tests are mocked — the full test suite runs in under 1 second
 - [ ] **Dialogue task** — multi-turn conversations in ShareGPT format
 - [ ] **Dataset card auto-generation** — auto-generate HuggingFace dataset cards with benchmark numbers
 - [ ] **Cost budgeting** — `max_cost_usd` parameter to cap spend before running
-- [ ] **PyPI release** — `pip install tessera` from the public index (packaging is ready, pending first stable release)
+- [ ] **PyPI release** — packaging is ready; the `tessera` name on PyPI is taken by an unrelated project, so the release will ship under a new distribution name (e.g. `tessera-data`)
 
 ---
 

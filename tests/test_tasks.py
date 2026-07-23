@@ -4,12 +4,11 @@ from __future__ import annotations
 import pytest
 
 from tessera.core.exceptions import ConfigurationError
-from tessera.core.models import Example, ExtractionSpec, QASpec, TaskType
+from tessera.core.models import Example, TaskType
 from tessera.tasks.classification import ClassificationTask
 from tessera.tasks.extraction import ExtractionTask
 from tessera.tasks.instruction import InstructionTask
 from tessera.tasks.qa import QATask
-
 
 # ---------------------------------------------------------------------------
 # ClassificationTask

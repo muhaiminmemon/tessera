@@ -1,4 +1,4 @@
-"""50 curated personas for diverse synthetic data generation."""
+"""60 curated personas for diverse synthetic data generation."""
 from __future__ import annotations
 
 from tessera.core.models import Persona

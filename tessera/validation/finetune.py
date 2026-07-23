@@ -6,13 +6,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
-log = logging.getLogger(__name__)
-
 from tessera.core.models import Example, TaskType
+
+log = logging.getLogger(__name__)
 
 
 def _examples_to_alpaca(examples: list[Example], task_type: TaskType) -> list[dict[str, str]]:
@@ -58,7 +57,7 @@ class UnslothFinetuner:
         train_examples: list[Example],
         task_type: TaskType,
         output_dir: str,
-        model_name: str = "unsloth/Llama-3.2-3B-Instruct",
+        base_model: str = "unsloth/Llama-3.2-3B-Instruct",
         max_seq_length: int = 2048,
         num_train_epochs: int = 3,
         per_device_train_batch_size: int = 4,
@@ -75,15 +74,15 @@ class UnslothFinetuner:
                 "Unsloth requires a CUDA GPU — run on Colab or a GPU instance."
             ) from e
 
-        from trl import SFTTrainer
-        from transformers import TrainingArguments
         from datasets import Dataset
+        from transformers import TrainingArguments
+        from trl import SFTTrainer
 
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
         model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=model_name,
+            model_name=base_model,
             max_seq_length=max_seq_length,
             dtype=None,
             load_in_4bit=True,

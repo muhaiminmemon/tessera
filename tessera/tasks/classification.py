@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import json
 from typing import Any
 
 from tessera.core.base import TaskTemplate

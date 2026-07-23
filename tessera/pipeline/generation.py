@@ -3,10 +3,9 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable
+from typing import Any, Callable
 
 from tessera.core import config as _cfg
 from tessera.core import prompts
@@ -15,8 +14,6 @@ from tessera.core.llm_client import get_client
 from tessera.core.models import (
     ClassificationSpec,
     Example,
-    ExtractionSpec,
-    InstructionSpec,
     Persona,
     QASpec,
     TaskSpec,
@@ -57,11 +54,17 @@ def _parse_json(raw: str) -> dict:
         inner = [ln for ln in lines[1:] if ln.strip() != "```"]
         text = "\n".join(inner).strip()
     try:
-        return json.loads(text)
+        data = json.loads(text)
     except json.JSONDecodeError as exc:
         raise GenerationError(
             f"LLM returned invalid JSON: {exc}. Raw response was: {raw!r}"
         ) from exc
+    if not isinstance(data, dict):
+        raise GenerationError(
+            f"LLM returned JSON of type {type(data).__name__}, expected object. "
+            f"Raw response was: {raw!r}"
+        )
+    return data
 
 
 class GenerationEngine:
@@ -217,7 +220,7 @@ class GenerationEngine:
         model: str,
     ) -> Example:
         """Construct an Example from parsed LLM JSON for non-QA task types."""
-        common = dict(
+        common: dict[str, Any] = dict(
             task_type=task_type,
             taxonomy_node_id=node.id,
             persona_id=persona.id,

@@ -12,9 +12,9 @@ from tessera.core.models import (
     QAExample,
     QAGenerationResult,
     QASpec,
+    TaskType,
     Taxonomy,
     TaxonomyNode,
-    TaskType,
 )
 from tessera.core.personas import PERSONAS
 

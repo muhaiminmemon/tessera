@@ -5,8 +5,7 @@ import pytest
 
 from tessera.core.base import TaskTemplate
 from tessera.core.exceptions import ConfigurationError
-from tessera.core.models import Example, Persona, TaskType, Taxonomy, TaxonomyNode
-
+from tessera.core.models import Example, TaskType, Taxonomy, TaxonomyNode
 
 # ---------------------------------------------------------------------------
 # _sample_nodes_balanced

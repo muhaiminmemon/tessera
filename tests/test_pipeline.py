@@ -6,23 +6,18 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tessera.core.exceptions import ConfigurationError, GenerationError, TaxonomyError
 from tessera.core.models import (
     ClassificationSpec,
-    CritiqueScores,
     Example,
     ExtractionSpec,
-    InstructionSpec,
-    QASpec,
     TaskType,
-    Taxonomy,
     TaxonomyNode,
 )
-from tessera.core.exceptions import ConfigurationError, TaxonomyError, GenerationError
 from tessera.pipeline.critique import CritiqueEngine, _parse_scores
 from tessera.pipeline.dedup import DedupEngine
 from tessera.pipeline.generation import GenerationEngine, _parse_json
 from tessera.pipeline.taxonomy import TaxonomyExpander
-
 
 # ---------------------------------------------------------------------------
 # _parse_json

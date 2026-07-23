@@ -14,12 +14,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-log = logging.getLogger(__name__)
-
 from dotenv import load_dotenv
-
-# Always load .env from the repo root, regardless of where Python is invoked from.
-load_dotenv(Path(__file__).parent.parent / ".env")
 
 from tessera.core.exceptions import (
     ConfigurationError,
@@ -43,6 +38,12 @@ from tessera.tasks.extraction import ExtractionTask
 from tessera.tasks.instruction import InstructionTask
 from tessera.tasks.qa import QATask
 
+log = logging.getLogger(__name__)
+
+# Always load .env from the repo root, regardless of where Python is invoked from.
+# API keys are read lazily at request time, so loading after imports is safe.
+load_dotenv(Path(__file__).parent.parent / ".env")
+
 __version__ = "0.1.0"
 __all__ = [
     "generate",
@@ -65,6 +66,27 @@ __all__ = [
     "TaxonomyError",
     "DeduplicationError",
 ]
+
+
+_PROVIDER_KEY_ENV: dict[str, str] = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "together": "TOGETHER_API_KEY",
+    "groq": "GROQ_API_KEY",
+}
+
+
+def _check_api_key_for_model(model: str) -> None:
+    """Raise ConfigurationError if the API key for the model's provider is missing."""
+    from tessera.core.llm_client import get_client
+
+    provider = get_client()._route(model)
+    env_var = _PROVIDER_KEY_ENV[provider]
+    if not os.environ.get(env_var):
+        raise ConfigurationError(
+            f"{env_var} is not set (model {model!r} routes to {provider}) — "
+            "add it to your .env file or export it as an environment variable."
+        )
 
 
 def generate(
@@ -108,15 +130,19 @@ def generate(
     -------
     GenerationResult
     """
-    if not os.environ.get("OPENAI_API_KEY"):
-        raise ConfigurationError(
-            "OPENAI_API_KEY is not set — add it to your .env file or export it as an environment variable."
-        )
-
     model = model or os.environ.get("TESSERA_DEFAULT_MODEL", "gpt-4o-mini")
-    task_type = TaskType(task.lower())
+    _check_api_key_for_model(model)
+    try:
+        task_type = TaskType(task.lower())
+    except ValueError:
+        raise ConfigurationError(
+            f"Unknown task type: {task!r}. "
+            "Choose from: classification, extraction, instruction, qa"
+        ) from None
     personas = get_all_personas()
 
+    spec: ClassificationSpec | ExtractionSpec | InstructionSpec | QASpec
+    task_obj: ClassificationTask | ExtractionTask | InstructionTask | QATask
     if task_type == TaskType.CLASSIFICATION:
         spec = ClassificationSpec(**spec_dict)
         task_obj = ClassificationTask(model=model, critique_model=model)
@@ -126,14 +152,9 @@ def generate(
     elif task_type == TaskType.INSTRUCTION:
         spec = InstructionSpec(**spec_dict)
         task_obj = InstructionTask(model=model, critique_model=model)
-    elif task_type == TaskType.QA:
+    else:  # TaskType.QA
         spec = QASpec(**spec_dict)
         task_obj = QATask(model=model, critique_model=model)
-    else:
-        raise ValueError(
-            f"Unknown task type: {task!r}. "
-            "Choose from: classification, extraction, instruction, qa"
-        )
 
     t0 = time.time()
     result = task_obj.run_pipeline(

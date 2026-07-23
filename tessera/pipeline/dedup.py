@@ -4,8 +4,12 @@ from __future__ import annotations
 import logging
 import uuid
 import warnings
+from typing import TYPE_CHECKING, Optional
 
 from tessera.core.models import Example, TaskType
+
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
 
 log = logging.getLogger(__name__)
 
@@ -13,9 +17,9 @@ log = logging.getLogger(__name__)
 class DedupEngine:
     def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
         self.model_name = model_name
-        self._encoder = None
+        self._encoder: Optional["SentenceTransformer"] = None
 
-    def _get_encoder(self) -> object:
+    def _get_encoder(self) -> "SentenceTransformer":
         if self._encoder is None:
             from sentence_transformers import SentenceTransformer
 
@@ -86,7 +90,7 @@ class DedupEngine:
                 n_results=1,
                 include=["distances"],
             )
-            distances = results["distances"][0]
+            distances = (results.get("distances") or [[]])[0]
             if distances:
                 # ChromaDB cosine distance: similarity = 1 - distance
                 similarity = 1.0 - distances[0]

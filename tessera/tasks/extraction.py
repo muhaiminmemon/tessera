@@ -103,7 +103,7 @@ class ExtractionTask(TaskTemplate):
                 for ex in examples
             ]
         if fmt in ("alpaca", "sharegpt"):
-            rows = []
+            rows: list[dict[str, Any]] = []
             for ex in examples:
                 system = (
                     "Extract structured information from the provided text "

@@ -4,12 +4,12 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from dataclasses import dataclass, field
-from typing import Optional
-
-log = logging.getLogger(__name__)
+from dataclasses import dataclass
+from typing import Any, Optional
 
 from tenacity import retry, stop_after_attempt, wait_exponential
+
+log = logging.getLogger(__name__)
 
 _client_singleton: Optional["LLMClient"] = None
 
@@ -18,9 +18,14 @@ _client_singleton: Optional["LLMClient"] = None
 _COST_TABLE: dict[str, tuple[float, float]] = {
     "gpt-4o-mini": (0.15, 0.60),
     "gpt-4o": (5.00, 15.00),
+    "gpt-4.1-mini": (0.40, 1.60),
+    "gpt-4.1-nano": (0.10, 0.40),
+    "gpt-4.1": (2.00, 8.00),
     "claude-3-haiku-20240307": (0.25, 1.25),
     "claude-haiku-3": (0.25, 1.25),
+    "claude-3-5-sonnet": (3.00, 15.00),
     "meta-llama/Llama-3.3-70B-Instruct-Turbo": (0.88, 0.88),
+    "llama-3.1-8b-instant": (0.05, 0.08),
 }
 
 
@@ -60,13 +65,13 @@ class UsageStats:
 class LLMClient:
     def __init__(self) -> None:
         self.usage = UsageStats()
-        self._openai: object = None
-        self._anthropic: object = None
-        self._together: object = None
-        self._groq: object = None
+        self._openai: Any = None
+        self._anthropic: Any = None
+        self._together: Any = None
+        self._groq: Any = None
         self._init_lock = threading.Lock()
 
-    def _get_openai(self) -> object:
+    def _get_openai(self) -> Any:
         if self._openai is None:
             with self._init_lock:
                 if self._openai is None:
@@ -78,7 +83,7 @@ class LLMClient:
                     )
         return self._openai
 
-    def _get_anthropic(self) -> object:
+    def _get_anthropic(self) -> Any:
         if self._anthropic is None:
             with self._init_lock:
                 if self._anthropic is None:
@@ -86,7 +91,7 @@ class LLMClient:
                     self._anthropic = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
         return self._anthropic
 
-    def _get_together(self) -> object:
+    def _get_together(self) -> Any:
         if self._together is None:
             with self._init_lock:
                 if self._together is None:
@@ -98,7 +103,7 @@ class LLMClient:
                     )
         return self._together
 
-    def _get_groq(self) -> object:
+    def _get_groq(self) -> Any:
         if self._groq is None:
             with self._init_lock:
                 if self._groq is None:
@@ -115,7 +120,9 @@ class LLMClient:
             return "anthropic"
         if "/" in model:
             return "together"
-        if "versatile" in model:
+        # Groq serves Llama models under names like "llama-3.1-8b-instant"
+        # and "llama-3.3-70b-versatile".
+        if "instant" in model or "versatile" in model:
             return "groq"
         return "openai"
 
@@ -164,11 +171,11 @@ class LLMClient:
         prompt_tokens = msg.usage.input_tokens
         completion_tokens = msg.usage.output_tokens
         self.usage.add(prompt_tokens, completion_tokens, model)
-        return msg.content[0].text
+        return str(msg.content[0].text)
 
     def _complete_openai_compat(
         self,
-        client: object,
+        client: Any,
         model: str,
         system: str,
         user: str,
